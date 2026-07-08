@@ -135,6 +135,54 @@ class TestStartAgentByName:
         assert called_cfg.name == "sub1"
 
 
+class TestStartSubAgentConfigSeeding:
+    """_start_sub_agent syncs the placeholder config.json to real auth."""
+
+    async def test_seeds_auth_from_agents_json(
+        self, supervisor: AgentSupervisor, tmp_path: Path
+    ) -> None:
+        # Simulate the config.json that workspace init writes from config.example:
+        # placeholder auth that must NOT survive.
+        config_path = tmp_path / "agents" / "sub1" / "config" / "config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            json.dumps(
+                {
+                    "provider": "gemini",
+                    "model": "flash",
+                    "reasoning_effort": "high",
+                    "allowed_user_ids": [123456789],
+                    "allowed_group_ids": [-1001234567890, -1009876543210],
+                    "group_mention_only": True,
+                }
+            )
+        )
+
+        sub_cfg = SubAgentConfig(
+            name="sub1",
+            telegram_token="tok:1",
+            allowed_user_ids=[7739164762],
+        )
+
+        with (
+            patch(
+                "ductor_bot.multiagent.supervisor.AgentStack.create",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
+            patch.object(supervisor, "_supervised_run", new_callable=AsyncMock),
+        ):
+            await supervisor._start_sub_agent(sub_cfg)
+
+        written = json.loads(config_path.read_text())
+        # Auth is now the real agents.json value, not the placeholder.
+        assert written["allowed_user_ids"] == [7739164762]
+        assert written["allowed_group_ids"] == []
+        assert written["group_mention_only"] is False
+        # model/provider/effort still synced to the merged runtime config.
+        assert written["provider"] == "claude"
+
+
 class TestRestartAgent:
     """Test restart_agent()."""
 

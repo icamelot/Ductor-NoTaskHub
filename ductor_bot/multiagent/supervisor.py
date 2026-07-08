@@ -453,8 +453,14 @@ class AgentSupervisor:
             logger.exception("Failed to create sub-agent '%s'", name)
             return
 
-        # Workspace init creates config.json from config.example (main defaults).
-        # Overwrite model/provider/effort so the on-disk config matches agents.json.
+        # Workspace init creates config.json from config.example (main defaults),
+        # which ships PLACEHOLDER auth (allowed_user_ids [123456789], etc.).
+        # Overwrite model/provider/effort AND the auth fields so the on-disk
+        # config.json matches the agents.json-derived runtime config. Without the
+        # auth sync, the config hot-reloader (which reads config.json directly)
+        # would clobber the real auth with the placeholders on the first
+        # config.json write (e.g. a /model switch), silently dropping the real
+        # user's messages.
         config_path = agent_home / "config" / "config.json"
         if config_path.exists():
             await update_config_file_async(
@@ -462,6 +468,9 @@ class AgentSupervisor:
                 provider=config.provider,
                 model=config.model,
                 reasoning_effort=config.reasoning_effort,
+                allowed_user_ids=config.allowed_user_ids,
+                allowed_group_ids=config.allowed_group_ids,
+                group_mention_only=config.group_mention_only,
             )
 
         self._stacks[name] = stack
