@@ -4,7 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ductor"
-version = "0.18.2"
+# Fork sentinel version: icamelot/ductor. The `+icamelot` local tag marks the
+# fork; the 0.999.0 base keeps ductor's naive dotted-int version parser
+# (infra/version.py:_parse_version, which truncates at the first non-int
+# segment → (0, 999)) always ABOVE any upstream 0.x release, so the PyPI
+# update-check nudge never fires and `ductor upgrade`'s retry path can never
+# clobber the fork with an upstream PyPI build. See MEMORY: ductor-project.
+version = "0.999.0+icamelot"
 description = "Control Claude Code and Codex CLI from Telegram. Live streaming, sessions, cron jobs, webhooks, Docker sandboxing."
 readme = "README.md"
 requires-python = ">=3.11"
