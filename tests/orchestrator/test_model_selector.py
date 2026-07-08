@@ -13,7 +13,7 @@ import pytest
 from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.cli.codex_cache import CodexModelCache
 from ductor_bot.cli.codex_discovery import CodexModelInfo
-from ductor_bot.config import reset_gemini_models, set_gemini_models
+from ductor_bot.config import CLAUDE_MODELS_ORDERED, reset_gemini_models, set_gemini_models
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.orchestrator.selectors.model_selector import (
     handle_model_callback,
@@ -130,6 +130,19 @@ async def test_start_one_provider_claude_includes_1m_variants(orch: Orchestrator
     assert "OPUS[1M]" in labels
     assert "ms:m:opus[1m]" in callbacks
     assert "ms:m:sonnet[1m]" in callbacks
+
+
+async def test_start_claude_models_one_per_row(orch: Orchestrator) -> None:
+    """Claude model buttons render one-per-row (vertical column), like Codex."""
+    with _patch_auth(
+        {"claude": _AUTHED_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
+    ):
+        resp = await model_selector_start(orch, SessionKey(chat_id=1))
+    assert resp.buttons is not None
+    # Every row holds exactly one button (each model + the back button).
+    assert all(len(row) == 1 for row in resp.buttons.rows)
+    model_rows = [r for r in resp.buttons.rows if r[0].callback_data.startswith("ms:m:")]
+    assert len(model_rows) >= len(CLAUDE_MODELS_ORDERED)
 
 
 async def test_start_one_provider_codex(orch: Orchestrator) -> None:

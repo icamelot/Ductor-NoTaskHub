@@ -394,13 +394,12 @@ async def _build_model_step(
     """Build the model selection keyboard for a provider."""
     if provider == "claude":
         claude_models = [*CLAUDE_MODELS_ORDERED, *sorted(get_deepseek_models())]
-        buttons = [Button(text=m.upper(), callback_data=f"ms:m:{m}") for m in claude_models]
-        keyboard = ButtonGrid(
-            rows=[
-                buttons,
-                [Button(text=t("model.btn_back"), callback_data="ms:b:root")],
-            ]
-        )
+        # One model per row (vertical column), matching the Codex selector.
+        claude_rows: list[list[Button]] = [
+            [Button(text=m.upper(), callback_data=f"ms:m:{m}")] for m in claude_models
+        ]
+        claude_rows.append([Button(text=t("model.btn_back"), callback_data="ms:b:root")])
+        keyboard = ButtonGrid(rows=claude_rows)
         return SelectorResponse(text=f"{header}\n\n{t('model.select_claude')}", buttons=keyboard)
 
     if provider == "gemini":
