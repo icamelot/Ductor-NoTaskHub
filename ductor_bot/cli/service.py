@@ -101,6 +101,9 @@ class CLIServiceConfig:
     permission_mode: str
     reasoning_effort: str = "medium"
     gemini_api_key: str | None = None
+    deepseek_base_url: str = ""
+    deepseek_api_key: str = ""
+    deepseek_models: frozenset[str] = frozenset()
     docker_container: str = ""
     claude_cli_parameters: tuple[str, ...] = ()
     codex_cli_parameters: tuple[str, ...] = ()
@@ -350,6 +353,9 @@ class CLIService:
                 permission_mode=self._config.permission_mode,
                 reasoning_effort=self._config.reasoning_effort,
                 gemini_api_key=self._config.gemini_api_key,
+                deepseek_base_url=self._config.deepseek_base_url,
+                deepseek_api_key=self._config.deepseek_api_key,
+                deepseek_models=self._config.deepseek_models,
                 docker_container=self._config.docker_container,
                 process_registry=self._process_registry,
                 chat_id=request.chat_id,

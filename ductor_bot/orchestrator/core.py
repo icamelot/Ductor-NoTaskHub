@@ -146,6 +146,11 @@ class Orchestrator:
                 permission_mode=config.permission_mode,
                 reasoning_effort=config.reasoning_effort,
                 gemini_api_key=config.gemini_api_key,
+                deepseek_base_url=config.deepseek.base_url,
+                deepseek_api_key=config.deepseek.api_key,
+                deepseek_models=(
+                    frozenset(config.deepseek.models) if config.deepseek.enabled else frozenset()
+                ),
                 docker_container=docker_container,
                 claude_cli_parameters=tuple(config.cli_parameters.claude),
                 codex_cli_parameters=tuple(config.cli_parameters.codex),
@@ -702,6 +707,7 @@ class Orchestrator:
                 "permission_mode",
                 "reasoning_effort",
                 "cli_parameters",
+                "deepseek",
             )
         ):
             self._cli_service.update_config(
@@ -714,6 +720,13 @@ class Orchestrator:
                     permission_mode=config.permission_mode,
                     reasoning_effort=config.reasoning_effort,
                     gemini_api_key=config.gemini_api_key,
+                    deepseek_base_url=config.deepseek.base_url,
+                    deepseek_api_key=config.deepseek.api_key,
+                    deepseek_models=(
+                        frozenset(config.deepseek.models)
+                        if config.deepseek.enabled
+                        else frozenset()
+                    ),
                     docker_container=self._cli_service._config.docker_container,
                     claude_cli_parameters=tuple(config.cli_parameters.claude),
                     codex_cli_parameters=tuple(config.cli_parameters.codex),

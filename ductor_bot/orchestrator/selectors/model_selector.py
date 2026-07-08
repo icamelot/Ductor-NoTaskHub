@@ -12,6 +12,7 @@ from ductor_bot.config import (
     ANTIGRAVITY_MODELS_ORDERED,
     CLAUDE_MODELS_ORDERED,
     get_antigravity_models,
+    get_deepseek_models,
     get_gemini_models,
     update_config_file_async,
 )
@@ -392,7 +393,8 @@ async def _build_model_step(
 ) -> SelectorResponse:
     """Build the model selection keyboard for a provider."""
     if provider == "claude":
-        buttons = [Button(text=m.upper(), callback_data=f"ms:m:{m}") for m in CLAUDE_MODELS_ORDERED]
+        claude_models = [*CLAUDE_MODELS_ORDERED, *sorted(get_deepseek_models())]
+        buttons = [Button(text=m.upper(), callback_data=f"ms:m:{m}") for m in claude_models]
         keyboard = ButtonGrid(
             rows=[
                 buttons,

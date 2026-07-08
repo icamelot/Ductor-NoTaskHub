@@ -17,6 +17,7 @@ from ductor_bot.cli.base import (
     _IS_WINDOWS,
     CLIConfig,
     _win_feed_stdin,
+    deepseek_env_for,
 )
 from ductor_bot.cli.stream_events import ResultEvent, StreamEvent
 from ductor_bot.cli.timeout_controller import TimeoutController
@@ -49,6 +50,9 @@ def build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
     for key, value in load_env_secrets(env_file).items():
         if key not in env:
             env[key] = value
+
+    # Model-driven DeepSeek override (host mode) — wins over inherited env.
+    env.update(deepseek_env_for(config))
 
     env["DUCTOR_AGENT_NAME"] = config.agent_name
     env["DUCTOR_AGENT_ROLE"] = "main" if config.agent_name == "main" else "sub"

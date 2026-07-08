@@ -152,3 +152,37 @@ def test_docker_wrap_sub_agent_windows_paths_are_posix() -> None:
     w_idx = result_cmd.index("-w")
     assert result_cmd[w_idx + 1] == "/ductor/agents/seismic-bot/workspace"
     assert "DUCTOR_HOME=/ductor/agents/seismic-bot" in result_cmd
+
+
+def test_deepseek_env_injected_when_model_selected() -> None:
+    """A DeepSeek model injects ANTHROPIC_BASE_URL/AUTH_TOKEN into docker exec."""
+    cmd = ["claude", "-p", "hi"]
+    cfg = CLIConfig(
+        docker_container="sandbox",
+        chat_id=1,
+        working_dir="/home/user/.ductor/workspace",
+        model="deepseek-v4-pro",
+        deepseek_base_url="https://api.deepseek.com/anthropic",
+        deepseek_api_key="sk-test",
+        deepseek_models=frozenset({"deepseek-v4-pro", "deepseek-v4-flash"}),
+    )
+    result_cmd, _ = docker_wrap(cmd, cfg)
+    assert "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic" in result_cmd
+    assert "ANTHROPIC_AUTH_TOKEN=sk-test" in result_cmd
+
+
+def test_deepseek_env_absent_for_native_claude_model() -> None:
+    """A native Claude model leaves the DeepSeek endpoint env untouched."""
+    cmd = ["claude", "-p", "hi"]
+    cfg = CLIConfig(
+        docker_container="sandbox",
+        chat_id=1,
+        working_dir="/home/user/.ductor/workspace",
+        model="opus",
+        deepseek_base_url="https://api.deepseek.com/anthropic",
+        deepseek_api_key="sk-test",
+        deepseek_models=frozenset({"deepseek-v4-pro"}),
+    )
+    result_cmd, _ = docker_wrap(cmd, cfg)
+    assert not any(a.startswith("ANTHROPIC_BASE_URL=") for a in result_cmd)
+    assert not any(a.startswith("ANTHROPIC_AUTH_TOKEN=") for a in result_cmd)

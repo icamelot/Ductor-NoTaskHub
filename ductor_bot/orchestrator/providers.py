@@ -12,8 +12,10 @@ from ductor_bot.config import (
     CLAUDE_MODELS,
     ModelRegistry,
     get_antigravity_models,
+    get_deepseek_models,
     get_gemini_models,
     set_antigravity_models,
+    set_deepseek_models,
     set_gemini_models,
 )
 
@@ -45,6 +47,10 @@ class ProviderManager:
         self._available_providers: frozenset[str] = frozenset()
         self._gemini_api_key_mode: bool | None = None
         self._codex_cache_fn = codex_cache_fn
+        # Register DeepSeek-via-Claude models (empty set clears when disabled).
+        set_deepseek_models(
+            frozenset(config.deepseek.models) if config.deepseek.enabled else frozenset()
+        )
         self.refresh_known_model_ids()
 
     # -- Public properties ----------------------------------------------------
@@ -148,6 +154,7 @@ class ProviderManager:
             | _GEMINI_ALIASES
             | get_gemini_models()
             | get_antigravity_models()
+            | get_deepseek_models()
         )
 
     def resolve_runtime_target(self, requested_model: str | None = None) -> tuple[str, str]:
@@ -215,7 +222,7 @@ class ProviderManager:
             name, color = provider_meta.get(pid, (pid.title(), "#A1A1AA"))
             models: list[str]
             if pid == "claude":
-                models = sorted(CLAUDE_MODELS)
+                models = [*sorted(CLAUDE_MODELS), *sorted(get_deepseek_models())]
             elif pid == "gemini":
                 gemini = get_gemini_models()
                 models = sorted(gemini) if gemini else sorted(_GEMINI_ALIASES)

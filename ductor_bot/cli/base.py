@@ -95,6 +95,11 @@ class CLIConfig:
     process_label: str = "main"
     # Gemini-specific auth fallback:
     gemini_api_key: str | None = None
+    # DeepSeek-via-Claude: when the active model is in deepseek_models, the
+    # Claude CLI is pointed at this endpoint for the turn (see deepseek_env_for).
+    deepseek_base_url: str = ""
+    deepseek_api_key: str = ""
+    deepseek_models: frozenset[str] = frozenset()
     # Extra CLI parameters (provider-specific):
     cli_parameters: list[str] = field(default_factory=list)
     # Transport identification (for routing results back):
@@ -155,6 +160,23 @@ def _docker_env_flags(
     return env_flags
 
 
+def deepseek_env_for(config: CLIConfig) -> dict[str, str]:
+    """Env overrides that point the Claude CLI at DeepSeek for this turn.
+
+    Returns ``ANTHROPIC_BASE_URL`` / ``ANTHROPIC_AUTH_TOKEN`` only when the
+    active model is one of the configured DeepSeek models and credentials are
+    present. Otherwise returns an empty dict so native Claude is untouched.
+    The active model name (e.g. ``deepseek-v4-pro``) is forwarded verbatim by
+    the Claude CLI to this endpoint, so no rewrite is needed here.
+    """
+    if config.model and config.deepseek_api_key and config.model in config.deepseek_models:
+        return {
+            "ANTHROPIC_BASE_URL": config.deepseek_base_url,
+            "ANTHROPIC_AUTH_TOKEN": config.deepseek_api_key,
+        }
+    return {}
+
+
 def docker_wrap(
     cmd: list[str],
     config: CLIConfig,
@@ -198,6 +220,9 @@ def docker_wrap(
                 del merged_extra[key]
         if extra_env:
             merged_extra.update(extra_env)  # Provider-specific overrides win.
+        # Model-driven DeepSeek override wins over both .env and provider env,
+        # and is applied after the os.environ strip so it is always injected.
+        merged_extra.update(deepseek_env_for(config))
         extra_env = merged_extra or None
 
         env_flags = _docker_env_flags(config, container_home, container_shared)

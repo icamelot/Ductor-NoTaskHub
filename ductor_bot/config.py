@@ -418,6 +418,22 @@ class SkillsConfig(BaseModel):
     sync: SkillSyncProviders = Field(default_factory=SkillSyncProviders)
 
 
+class DeepseekConfig(BaseModel):
+    """Optional DeepSeek-via-Claude endpoint.
+
+    When ``enabled``, the listed models are registered as extra *Claude*
+    provider models (they share Claude's session bucket and ``/model`` menu).
+    Selecting one makes the Claude CLI talk to ``base_url`` with ``api_key``
+    by injecting ``ANTHROPIC_BASE_URL`` / ``ANTHROPIC_AUTH_TOKEN`` for that
+    turn only; native Claude models in the same bucket are unaffected.
+    """
+
+    enabled: bool = False
+    base_url: str = "https://api.deepseek.com/anthropic"
+    api_key: str = ""
+    models: list[str] = Field(default_factory=lambda: ["deepseek-v4-pro", "deepseek-v4-flash"])
+
+
 class AgentConfig(BaseModel):
     """Top-level configuration loaded from config.json."""
 
@@ -437,6 +453,7 @@ class AgentConfig(BaseModel):
     reasoning_effort: str = "medium"
     file_access: str = "all"
     gemini_api_key: str | None = None
+    deepseek: DeepseekConfig = Field(default_factory=DeepseekConfig)
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
@@ -602,6 +619,8 @@ ANTIGRAVITY_MODELS: frozenset[str] = frozenset(ANTIGRAVITY_MODELS_ORDERED)
 
 _runtime_gemini: list[frozenset[str]] = [frozenset()]
 _runtime_antigravity: list[frozenset[str]] = [frozenset()]
+# DeepSeek models registered under the Claude provider (see DeepseekConfig).
+_runtime_deepseek: list[frozenset[str]] = [frozenset()]
 
 
 class ModelRegistry:
@@ -620,7 +639,11 @@ class ModelRegistry:
         full model IDs (``claude-opus-4-7``), so any ``claude-`` prefix
         routes to Claude.
         """
-        if model_id in CLAUDE_MODELS or model_id.startswith("claude-"):
+        if (
+            model_id in CLAUDE_MODELS
+            or model_id in _runtime_deepseek[0]
+            or model_id.startswith("claude-")
+        ):
             return "claude"
         if (
             model_id in _GEMINI_ALIASES
@@ -655,6 +678,20 @@ def set_gemini_models(models: frozenset[str]) -> None:
 def reset_gemini_models() -> None:
     """Clear runtime Gemini models. For test teardown only."""
     _runtime_gemini[0] = frozenset()
+
+
+def get_deepseek_models() -> frozenset[str]:
+    """Return DeepSeek models registered under the Claude provider (may be empty)."""
+    return _runtime_deepseek[0]
+
+
+def set_deepseek_models(models: frozenset[str]) -> None:
+    """Set the DeepSeek-via-Claude model set.
+
+    Unlike the gemini/antigravity setters this accepts an empty set, so that
+    disabling ``deepseek`` in config (or a hot reload) clears the registration.
+    """
+    _runtime_deepseek[0] = models
 
 
 def get_antigravity_models() -> frozenset[str]:
