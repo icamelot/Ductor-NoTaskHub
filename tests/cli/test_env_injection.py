@@ -72,8 +72,13 @@ def test_docker_wrap_injects_secrets(tmp_path: Path) -> None:
     assert "PPLX_API_KEY=sk-test" in cmd
 
 
-def test_docker_wrap_does_not_override_host_env(tmp_path: Path) -> None:
-    """Secrets already in host env must not be duplicated in Docker."""
+def test_docker_wrap_env_file_wins_over_host_env(tmp_path: Path) -> None:
+    """Secrets are injected even when the host env has the same key.
+
+    The exec'd container process does not inherit the host environment, so
+    skipping injection would silently drop the variable inside the container
+    (or leave a stale image-baked value in place).
+    """
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     env_file = tmp_path / ".env"
@@ -87,8 +92,31 @@ def test_docker_wrap_does_not_override_host_env(tmp_path: Path) -> None:
     with patch.dict("os.environ", {"EXISTING_VAR": "from-host"}, clear=False):
         cmd, _ = docker_wrap(["gemini"], config)
 
-    # The .env value should NOT appear (host env takes precedence).
-    assert "EXISTING_VAR=from-dotenv" not in cmd
+    assert "EXISTING_VAR=from-dotenv" in cmd
+
+
+def test_docker_wrap_sub_agent_env_overrides_main(tmp_path: Path) -> None:
+    """A sub-agent's own .env takes priority over the main agent's .env."""
+    agent_home = tmp_path / "agents" / "botbuilder"
+    workspace = agent_home / "workspace"
+    workspace.mkdir(parents=True)
+    (tmp_path / ".env").write_text("SHARED_KEY=from-main\nMAIN_ONLY=main-val\n")
+    (agent_home / ".env").write_text("SHARED_KEY=from-agent\nAGENT_ONLY=agent-val\n")
+
+    config = CLIConfig(
+        working_dir=str(workspace),
+        docker_container="test-container",
+        agent_name="botbuilder",
+    )
+    clear_cache()
+    with patch.dict("os.environ", {}, clear=False):
+        cmd, _ = docker_wrap(["claude"], config)
+
+    assert "SHARED_KEY=from-agent" in cmd
+    assert "SHARED_KEY=from-main" not in cmd
+    # Main .env stays available as the low-priority baseline.
+    assert "MAIN_ONLY=main-val" in cmd
+    assert "AGENT_ONLY=agent-val" in cmd
 
 
 def test_docker_wrap_provider_extra_env_wins(tmp_path: Path) -> None:

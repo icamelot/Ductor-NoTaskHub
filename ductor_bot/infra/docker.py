@@ -392,7 +392,7 @@ class DockerManager:
         # User-defined project mounts.
         cmd += _build_user_mount_flags(self._config.mounts)
 
-        # User secrets from .env (never override existing host vars).
+        # User secrets from the agent's .env.
         cmd += self._env_secret_flags()
 
         cmd.append(image)
@@ -408,13 +408,16 @@ class DockerManager:
         return True
 
     def _env_secret_flags(self) -> list[str]:
-        """Return ``-e`` flags for user secrets from ``~/.ductor/.env``."""
+        """Return ``-e`` flags for user secrets from the agent's ``.env``.
+
+        The container does not inherit the host environment, so every var
+        from the .env file is passed unconditionally.
+        """
         from ductor_bot.infra.env_secrets import load_env_secrets
 
         flags: list[str] = []
         for key, value in load_env_secrets(self._paths.env_file).items():
-            if key not in os.environ:
-                flags += ["-e", f"{key}={value}"]
+            flags += ["-e", f"{key}={value}"]
         return flags
 
     async def _exec_stream(

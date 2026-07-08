@@ -21,9 +21,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_cache: dict[str, str] | None = None
-_cache_path: Path | None = None
-_cache_mtime: float = 0.0
+# Per-path cache: {path: (mtime, parsed_vars)}. Multi-agent mode reads
+# several .env files (main + one per sub-agent) on every CLI invocation.
+_cache: dict[Path, tuple[float, dict[str, str]]] = {}
 
 
 def _parse_dotenv(path: Path) -> dict[str, str]:
@@ -73,37 +73,30 @@ def load_env_secrets(env_file: Path) -> dict[str, str]:
     """Load secrets from *env_file*, re-reading when the file changes.
 
     Uses mtime-based cache invalidation so edits to ``.env`` take effect
-    on the next CLI invocation without a bot restart.
+    on the next CLI invocation without a bot restart.  Each path is cached
+    independently so multiple agents' .env files don't evict each other.
     """
-    global _cache, _cache_path, _cache_mtime  # noqa: PLW0603
-
     mtime = _current_mtime(env_file)
 
-    # Cache hit: same path and file unchanged.
-    if _cache is not None and _cache_path == env_file and mtime == _cache_mtime:
-        return _cache
+    cached = _cache.get(env_file)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
 
     # File missing or deleted.
     if mtime == 0.0:
-        if _cache_mtime != 0.0 and _cache_path == env_file:
+        if cached is not None and cached[0] != 0.0:
             logger.info("Env file removed: %s", env_file)
-        _cache = {}
-        _cache_path = env_file
-        _cache_mtime = 0.0
-        return _cache
+        _cache[env_file] = (0.0, {})
+        return _cache[env_file][1]
 
     # (Re-)parse.
-    _cache = _parse_dotenv(env_file)
-    _cache_path = env_file
-    _cache_mtime = mtime
-    if _cache:
-        logger.info("Loaded %d secret(s) from %s", len(_cache), env_file)
-    return _cache
+    parsed = _parse_dotenv(env_file)
+    _cache[env_file] = (mtime, parsed)
+    if parsed:
+        logger.info("Loaded %d secret(s) from %s", len(parsed), env_file)
+    return parsed
 
 
 def clear_cache() -> None:
     """Reset the cached secrets (for tests)."""
-    global _cache, _cache_path, _cache_mtime  # noqa: PLW0603
-    _cache = None
-    _cache_path = None
-    _cache_mtime = 0.0
+    _cache.clear()
