@@ -465,3 +465,50 @@ class TestDockerManager:
 
         assert r1 == "test-ctr"
         assert r2 == "test-ctr"
+
+
+class TestStartContainerAgentName:
+    """`_start_container` injects DUCTOR_AGENT_NAME so one image serves all agents."""
+
+    async def _capture_run_cmd(self, mgr: object) -> list[str]:
+        captured: dict[str, list[str]] = {}
+
+        async def mock_exec(*args: str, **_kwargs: object) -> tuple[int, str]:
+            if args and args[0] == "docker" and "run" in args:
+                captured["run"] = list(args)
+            return 0, "container_id"
+
+        with patch.object(mgr, "_exec", side_effect=mock_exec):
+            await mgr._start_container("ctr", "img")  # type: ignore[attr-defined]
+        return captured["run"]
+
+    def _agent_name_from(self, run_cmd: list[str]) -> str:
+        for i, tok in enumerate(run_cmd):
+            if tok == "-e" and run_cmd[i + 1].startswith("DUCTOR_AGENT_NAME="):
+                return run_cmd[i + 1].split("=", 1)[1]
+        raise AssertionError("DUCTOR_AGENT_NAME not injected")
+
+    async def test_main_agent_name(
+        self, docker_config: DockerConfig, docker_paths: DuctorPaths
+    ) -> None:
+        from ductor_bot.infra.docker import DockerManager
+
+        mgr = DockerManager(docker_config, docker_paths)
+        run_cmd = await self._capture_run_cmd(mgr)
+        assert self._agent_name_from(run_cmd) == "main"
+
+    async def test_sub_agent_name(
+        self, docker_config: DockerConfig, docker_paths: DuctorPaths
+    ) -> None:
+        from ductor_bot.infra.docker import DockerManager
+
+        sub_home = docker_paths.ductor_home / "agents" / "serveradmin"
+        sub_home.mkdir(parents=True)
+        sub_paths = DuctorPaths(
+            ductor_home=sub_home,
+            home_defaults=docker_paths.framework_root / "workspace",
+            framework_root=docker_paths.framework_root,
+        )
+        mgr = DockerManager(docker_config, sub_paths)
+        run_cmd = await self._capture_run_cmd(mgr)
+        assert self._agent_name_from(run_cmd) == "serveradmin"

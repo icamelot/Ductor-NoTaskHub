@@ -1,7 +1,12 @@
-# Dockerfile.sandbox -- lightweight sandbox for ductor CLI execution.
-# Based on Node 22 (Debian bookworm) with Python 3, Claude Code CLI,
-# and Codex CLI pre-installed.  The container runs "sleep infinity" so
-# ductor can `docker exec` into it on demand.
+# Dockerfile.sandbox -- unified sandbox for ductor CLI execution (icamelot fork).
+# Based on Node 22 (Debian bookworm) with Python 3 and the Claude/Codex/Gemini
+# CLIs pre-installed. ONE image serves the main agent and all sub-agents:
+#   * PID 1 is init.py (reaps zombies, forwards signals) for every container.
+#   * The main-only personal-assistant daemons (start.sh) are launched only
+#     when DUCTOR_AGENT_NAME=main (injected at `docker run` by infra/docker.py).
+# Overlay vs upstream: adds a host-uid `builder` user with passwordless sudo
+# (Linux runs `docker run --user <host uid/gid>`, which needs a matching passwd
+# entry to sudo) plus gh and common dev tools.
 
 FROM node:22-bookworm-slim
 
@@ -42,7 +47,38 @@ RUN mkdir -p /data && chown node:node /data
 # Let the `node` user run sudo without a password (useful for apt inside sandbox)
 RUN echo "node ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/node
 
+# --- icamelot overlay -------------------------------------------------------
+# Host-uid builder user with passwordless sudo. On Linux ductor runs the
+# container with `--user <host uid>:<host gid>`; without a matching passwd
+# entry sudo fails ("you do not exist in the passwd database"). HOST_UID/GID
+# default to 1002 (this host); override with --build-arg when building.
+ARG HOST_UID=1002
+ARG HOST_GID=1002
+RUN groupadd -g "${HOST_GID}" builder 2>/dev/null || true \
+    && useradd -u "${HOST_UID}" -g "${HOST_GID}" -m -s /bin/bash builder 2>/dev/null || true \
+    && echo "builder ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/builder \
+    && chmod 0440 /etc/sudoers.d/builder
+
+# Dev/CLI tooling used by agents.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       wget jq rsync tree vim unzip p7zip-full file \
+    && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
+# --- end icamelot overlay ---------------------------------------------------
+
 USER node
 WORKDIR /workspace
 
-CMD ["sleep", "infinity"]
+# PID 1 = init.py for all containers (zombie reaping + signal forwarding).
+# start.sh (main-only daemons) runs only for the main agent. If
+# DUCTOR_AGENT_NAME is unset/empty, the test is false → daemons do NOT start
+# (safe sub-agent default).
+CMD ["/bin/bash", "-lc", \
+     "[ \"$DUCTOR_AGENT_NAME\" = main ] && bash /ductor/workspace/daemons/start.sh; exec python3 -u /ductor/workspace/daemons/init.py"]

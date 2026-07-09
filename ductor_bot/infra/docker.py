@@ -322,9 +322,16 @@ class DockerManager:
         # Sub-agent homes live at <root>/agents/<name>/; the container must see
         # the full tree so every agent can access its own workspace via paths
         # like /ductor/agents/<name>/workspace.
-        ductor_home = self._paths.ductor_home
+        agent_home = self._paths.ductor_home
+        ductor_home = agent_home
         if ductor_home.parent.name == "agents":
             ductor_home = ductor_home.parent.parent
+
+        # Agent identity, available at container-run time (PID 1). Sub-agent
+        # homes live at <root>/agents/<name>/; the main agent home is the root.
+        # The image CMD uses this to decide whether to launch the main-only
+        # daemons (start.sh) — so one shared image serves main and sub-agents.
+        agent_name = agent_home.name if agent_home.parent.name == "agents" else "main"
 
         cmd: list[str] = [
             "docker",
@@ -339,6 +346,8 @@ class DockerManager:
             f"{ductor_home}:{_DUCTOR_MOUNT}",
             "-e",
             f"DUCTOR_HOME={_DUCTOR_MOUNT}",
+            "-e",
+            f"DUCTOR_AGENT_NAME={agent_name}",
             # Allow inter-agent communication from inside the container back
             # to the host's InternalAgentAPI (127.0.0.1:8799).
             "--add-host=host.docker.internal:host-gateway",
