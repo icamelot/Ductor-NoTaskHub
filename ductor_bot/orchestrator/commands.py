@@ -83,8 +83,8 @@ async def cmd_usage(orch: Orchestrator, _key: SessionKey, _text: str) -> Orchest
     )
     blocks = [
         ds_block,
-        _format_plan_usage(claude_usage, "🤖 Claude Code", tz),
-        _format_plan_usage(codex_usage, "🧠 Codex", tz),
+        _format_plan_usage(claude_usage, "✴️ Claude Code", tz),
+        _format_plan_usage(codex_usage, "🤖 Codex", tz),
     ]
     return OrchestratorResult(text="\n\n".join(b for b in blocks if b))
 

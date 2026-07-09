@@ -393,10 +393,10 @@ async def test_usage_includes_claude_and_codex_plan(
     session = _FakeSession(_FakeResp(200, _BALANCE_OK))
     with patch(_SESSION_PATCH, return_value=session):
         result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
-    assert "🤖 Claude Code (pro)" in result.text
+    assert "✴️ Claude Code (pro)" in result.text
     assert "5h 49%" in result.text
     assert "本周 21%" in result.text
-    assert "🧠 Codex (plus)" in result.text
+    assert "🤖 Codex (plus)" in result.text
 
 
 async def test_usage_plan_errors_are_friendly(
@@ -406,8 +406,8 @@ async def test_usage_plan_errors_are_friendly(
     claude.return_value = PlanUsage("claude", ok=False, error="expired")
     codex.return_value = PlanUsage("codex", ok=False, error="no_auth")
     result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
-    assert "🤖 Claude Code: 登录已过期" in result.text
-    assert "🧠 Codex: 未登录" in result.text
+    assert "✴️ Claude Code: 登录已过期" in result.text
+    assert "🤖 Codex: 未登录" in result.text
 
 
 def test_deepseek_balance_url_derivation() -> None:
