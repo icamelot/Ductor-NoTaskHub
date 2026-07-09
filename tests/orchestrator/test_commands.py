@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Self
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -13,6 +14,7 @@ from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.orchestrator.commands import (
     _deepseek_balance_url,
     _parse_total_balance,
+    _reference_snapshot,
     cmd_cron,
     cmd_diagnose,
     cmd_memory,
@@ -375,3 +377,26 @@ def test_parse_total_balance() -> None:
     assert _parse_total_balance({"balance_infos": []}) is None
     assert _parse_total_balance({"balance_infos": [{"total_balance": "nope"}]}) is None
     assert _parse_total_balance("garbage") is None
+
+
+def test_reference_snapshot_uses_local_midnight() -> None:
+    """Today's boundary follows the given local timezone, not UTC."""
+    tz = ZoneInfo("Asia/Shanghai")  # UTC+8
+    midnight_local = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    before = (midnight_local - timedelta(minutes=5)).isoformat()  # yesterday (local)
+    after = (midnight_local + timedelta(minutes=5)).isoformat()  # today (local)
+    snapshots: list[object] = [
+        {"label": "yesterday", "timestamp": before, "balance": 100.0},
+        {"label": "today", "timestamp": after, "balance": 95.0},
+    ]
+    ref = _reference_snapshot(snapshots, tz)
+    assert ref is not None
+    assert ref["balance"] == 95.0  # today's first snapshot, by local midnight
+
+    # A snapshot 5 min before local midnight would count as "today" under UTC
+    # (UTC+8 is 8h ahead), proving the boundary is local, not UTC.
+    ref_utc_would_differ = _reference_snapshot(
+        [{"label": "yesterday", "timestamp": before, "balance": 100.0}], tz
+    )
+    assert ref_utc_would_differ is not None  # falls back to yesterday_last
+    assert ref_utc_would_differ["balance"] == 100.0

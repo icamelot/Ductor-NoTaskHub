@@ -9,10 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
 from ductor_bot.cli.auth import check_all_auth
+from ductor_bot.config import resolve_user_timezone
 from ductor_bot.i18n import t
 from ductor_bot.infra.version import check_pypi, get_current_version
 from ductor_bot.orchestrator.registry import OrchestratorResult
@@ -101,7 +103,8 @@ async def cmd_usage(orch: Orchestrator, _key: SessionKey, _text: str) -> Orchest
         return OrchestratorResult(text=f"{_USAGE_HEADER}\nDeepSeek 未返回可用余额信息。")
 
     lines = [f"🐳 DeepSeek 余额: ¥{balance:.2f}"]
-    spent = await asyncio.to_thread(_today_consumption, orch.paths, balance)
+    tz = resolve_user_timezone(orch.config.user_timezone)
+    spent = await asyncio.to_thread(_today_consumption, orch.paths, balance, tz)
     if spent is not None:
         if spent >= 0:
             lines.append(f"📉 今日消费: ¥{spent:.2f}")
@@ -379,9 +382,13 @@ def _load_balance_snapshots(paths: DuctorPaths) -> list[object]:
     return data if isinstance(data, list) else []
 
 
-def _reference_snapshot(snapshots: list[object]) -> dict[str, object] | None:
-    """Pick today's first snapshot, else the most recent one before today."""
-    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+def _reference_snapshot(snapshots: list[object], tz: ZoneInfo) -> dict[str, object] | None:
+    """Pick today's first snapshot, else the most recent one before today.
+
+    "Today" is bounded by local midnight in *tz* (the user's configured
+    timezone), so the number matches the user's calendar day rather than UTC.
+    """
+    today_start = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
     today_first: dict[str, object] | None = None
     yesterday_last: dict[str, object] | None = None
     for snap in snapshots:
@@ -396,13 +403,14 @@ def _reference_snapshot(snapshots: list[object]) -> dict[str, object] | None:
     return today_first or yesterday_last
 
 
-def _today_consumption(paths: DuctorPaths, current_balance: float) -> float | None:
+def _today_consumption(paths: DuctorPaths, current_balance: float, tz: ZoneInfo) -> float | None:
     """Best-effort today's spend: (today's first snapshot balance) minus current.
 
-    Returns None when no usable snapshot exists (e.g. the skill isn't installed),
-    so the balance still renders on machines without it.
+    "Today" is measured in the user's local timezone *tz*. Returns None when no
+    usable snapshot exists (e.g. the skill isn't installed), so the balance still
+    renders on machines without it.
     """
-    ref = _reference_snapshot(_load_balance_snapshots(paths))
+    ref = _reference_snapshot(_load_balance_snapshots(paths), tz)
     if ref is None:
         return None
     try:
