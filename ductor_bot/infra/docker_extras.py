@@ -210,11 +210,33 @@ def calculate_build_timeout(extras: list[DockerExtra], base: int = 300) -> int:
     return base + sum(e.build_timeout_extra for e in extras)
 
 
+def _extract_last_cmd(dockerfile: str) -> str | None:
+    """Return the last ``CMD`` instruction (with line continuations) or None."""
+    lines = dockerfile.splitlines()
+    block: list[str] | None = None
+    i = 0
+    while i < len(lines):
+        if lines[i].lstrip().startswith("CMD "):
+            current = [lines[i]]
+            while current[-1].rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1
+                current.append(lines[i])
+            block = current
+        i += 1
+    return "\n".join(block) if block else None
+
+
 def generate_dockerfile_extras(base_content: str, extras: list[DockerExtra]) -> str:
     """Append ``RUN`` instructions for *extras* to the base Dockerfile content.
 
     Groups apt and pip installs for layer efficiency.  Packages that require a
     custom ``--index-url`` (e.g. PyTorch CPU) get a separate ``RUN`` command.
+
+    The base image's ``CMD`` is re-emitted as the final instruction: Docker
+    restores image config (including ``CMD``) from cache-hit ``RUN``/``USER``
+    layers, so a ``CMD`` set earlier in the base can be silently reverted to a
+    stale value when the appended extras layers are served from an older
+    image's build cache. Emitting it last guarantees the intended ``CMD`` wins.
     """
     if not extras:
         return base_content
@@ -266,6 +288,12 @@ def generate_dockerfile_extras(base_content: str, extras: list[DockerExtra]) -> 
 
     lines.append("")
     lines.append("USER node")
+
+    base_cmd = _extract_last_cmd(base_content)
+    if base_cmd:
+        lines.append("")
+        lines.append(base_cmd)
+
     lines.append("")
 
     return "\n".join(lines)

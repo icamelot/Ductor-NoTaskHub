@@ -159,6 +159,25 @@ class TestGenerateDockerfile:
         result = generate_dockerfile_extras(_BASE, extras)
         assert result.startswith(_BASE.rstrip())
 
+    def test_reemits_base_cmd_after_extras(self) -> None:
+        # A base CMD must be re-emitted as the FINAL instruction so a cache-hit
+        # extras layer cannot revert it to a stale value.
+        base = 'FROM ubuntu\nUSER node\nCMD ["sleep", "infinity"]\n'
+        result = generate_dockerfile_extras(base, resolve_extras(["ffmpeg"]))
+        assert result.rstrip().endswith('CMD ["sleep", "infinity"]')
+        assert result.rfind("CMD ") > result.rfind("USER node")
+
+    def test_reemits_multiline_base_cmd(self) -> None:
+        base = 'FROM ubuntu\nUSER node\nCMD ["/bin/bash", "-lc", \\\n     "echo hi"]\n'
+        result = generate_dockerfile_extras(base, resolve_extras(["ffmpeg"]))
+        assert result.rstrip().endswith('"echo hi"]')
+        assert result.rfind("CMD ") > result.rfind("USER node")
+
+    def test_no_cmd_in_base_is_noop(self) -> None:
+        # _BASE has no CMD → nothing extra appended, still ends at USER node.
+        result = generate_dockerfile_extras(_BASE, resolve_extras(["ffmpeg"]))
+        assert result.rstrip().endswith("USER node")
+
     def test_user_switch(self) -> None:
         extras = resolve_extras(["ffmpeg"])
         result = generate_dockerfile_extras(_BASE, extras)
