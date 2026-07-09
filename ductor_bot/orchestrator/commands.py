@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 
 from ductor_bot.cli.auth import check_all_auth
+from ductor_bot.cli.plan_usage import PlanUsage, fetch_claude_usage, fetch_codex_usage
 from ductor_bot.config import resolve_user_timezone
 from ductor_bot.i18n import t
 from ductor_bot.infra.version import check_pypi, get_current_version
@@ -59,26 +60,40 @@ async def cmd_status(orch: Orchestrator, key: SessionKey, _text: str) -> Orchest
     return OrchestratorResult(text=await _build_status(orch, key))
 
 
-_USAGE_HEADER = "🐳 DeepSeek 余额"
 _DEEPSEEK_TIMEOUT = aiohttp.ClientTimeout(total=10)
 # Personal-assistant skill's balance snapshot file (relative to the workspace).
 # Optional: only present when that skill is installed, so reads are best-effort.
 _BALANCE_SNAPSHOT_REL = ("skills", "personal-assistant", ".balance_snapshots.json")
 
+_PLAN_ERROR_MSG = {
+    "no_auth": "未登录",
+    "expired": "登录已过期 (请在 CLI 中重新登录)",
+    "error": "查询失败",
+}
+
 
 async def cmd_usage(orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
-    """Handle /usage: show the DeepSeek account balance (and today's spend)."""
-    logger.info("Usage (DeepSeek balance) requested")
+    """Handle /usage: DeepSeek balance + Claude/Codex plan usage (5h + weekly)."""
+    logger.info("Usage requested")
+    tz = resolve_user_timezone(orch.config.user_timezone)
+    ds_block, claude_usage, codex_usage = await asyncio.gather(
+        _deepseek_block(orch, tz),
+        fetch_claude_usage(),
+        fetch_codex_usage(),
+    )
+    blocks = [
+        ds_block,
+        _format_plan_usage(claude_usage, "🤖 Claude Code", tz),
+        _format_plan_usage(codex_usage, "🧠 Codex", tz),
+    ]
+    return OrchestratorResult(text="\n\n".join(b for b in blocks if b))
+
+
+async def _deepseek_block(orch: Orchestrator, tz: ZoneInfo) -> str:
+    """Build the DeepSeek balance section (best-effort, self-contained)."""
     ds = orch.config.deepseek
     if not ds.enabled or not ds.api_key:
-        return OrchestratorResult(
-            text=(
-                f"{_USAGE_HEADER}\n"
-                "DeepSeek 未启用或未配置 API key。\n"
-                "请在 `~/.ductor/config/config.json` 的 `deepseek` 段中设置 "
-                "`enabled: true` 并填入 `api_key`。"
-            ),
-        )
+        return "🐳 DeepSeek: 未启用或未配置 API key。"
 
     url = _deepseek_balance_url(ds.base_url)
     headers = {"Authorization": f"Bearer {ds.api_key}", "Accept": "application/json"}
@@ -91,26 +106,48 @@ async def cmd_usage(orch: Orchestrator, _key: SessionKey, _text: str) -> Orchest
             data = await resp.json(content_type=None) if status == 200 else None
     except (aiohttp.ClientError, TimeoutError, ValueError):
         logger.warning("DeepSeek balance query failed", exc_info=True)
-        return OrchestratorResult(text=f"{_USAGE_HEADER}\n查询余额时网络异常或超时。请稍后再试。")
+        return "🐳 DeepSeek: 查询余额时网络异常或超时。"
 
     if data is None:
-        return OrchestratorResult(
-            text=f"{_USAGE_HEADER}\n查询失败: HTTP {status}。请检查 API key 是否有效或稍后再试。",
-        )
+        return f"🐳 DeepSeek: 查询失败 (HTTP {status})。"
 
     balance = _parse_total_balance(data)
     if balance is None:
-        return OrchestratorResult(text=f"{_USAGE_HEADER}\nDeepSeek 未返回可用余额信息。")
+        return "🐳 DeepSeek: 未返回可用余额信息。"
 
     lines = [f"🐳 DeepSeek 余额: ¥{balance:.2f}"]
-    tz = resolve_user_timezone(orch.config.user_timezone)
     spent = await asyncio.to_thread(_today_consumption, orch.paths, balance, tz)
     if spent is not None:
         if spent >= 0:
             lines.append(f"📉 今日消费: ¥{spent:.2f}")
         else:
             lines.append(f"📈 今日充值: ¥{abs(spent):.2f}")
-    return OrchestratorResult(text="\n".join(lines))
+    return "\n".join(lines)
+
+
+def _reset_suffix(reset: datetime | None, tz: ZoneInfo, *, time_only: bool) -> str:
+    """Render a compact reset-time hint for a usage window."""
+    if reset is None:
+        return ""
+    local = reset.astimezone(tz)
+    return f"  重置 {local:%H:%M}" if time_only else f"  重置 {local:%m-%d}"
+
+
+def _format_plan_usage(usage: PlanUsage, label: str, tz: ZoneInfo) -> str:
+    """Render a Claude/Codex plan-usage block (5h + weekly utilization)."""
+    if not usage.ok:
+        return f"{label}: {_PLAN_ERROR_MSG.get(usage.error, '不可用')}"
+    header = f"{label} ({usage.plan})" if usage.plan else label
+    rows: list[str] = []
+    if usage.five_hour_pct is not None:
+        suffix = _reset_suffix(usage.five_hour_reset, tz, time_only=True)
+        rows.append(f"  5h {usage.five_hour_pct:.0f}%{suffix}")
+    if usage.weekly_pct is not None:
+        suffix = _reset_suffix(usage.weekly_reset, tz, time_only=False)
+        rows.append(f"  本周 {usage.weekly_pct:.0f}%{suffix}")
+    if not rows:
+        return f"{label}: 无数据"
+    return header + "\n" + "\n".join(rows)
 
 
 async def cmd_model(orch: Orchestrator, key: SessionKey, text: str) -> OrchestratorResult:

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Self
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 import aiohttp
+import pytest
 
 from ductor_bot.cli.auth import AuthResult, AuthStatus
+from ductor_bot.cli.plan_usage import PlanUsage
 from ductor_bot.orchestrator.commands import (
     _deepseek_balance_url,
     _parse_total_balance,
@@ -304,12 +307,26 @@ def _enable_deepseek(orch: Orchestrator) -> None:
     orch.config.deepseek.api_key = "sk-test-key"
 
 
+@pytest.fixture
+def plan_fetchers() -> Iterator[tuple[AsyncMock, AsyncMock]]:
+    """Patch Claude/Codex plan fetchers so cmd_usage never touches the network."""
+    claude = AsyncMock(return_value=PlanUsage("claude", ok=False, error="no_auth"))
+    codex = AsyncMock(return_value=PlanUsage("codex", ok=False, error="no_auth"))
+    with (
+        patch("ductor_bot.orchestrator.commands.fetch_claude_usage", claude),
+        patch("ductor_bot.orchestrator.commands.fetch_codex_usage", codex),
+    ):
+        yield claude, codex
+
+
+@pytest.mark.usefixtures("plan_fetchers")
 async def test_usage_disabled_when_no_key(orch: Orchestrator) -> None:
     result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
     assert "未启用" in result.text
     assert "sk-test" not in result.text
 
 
+@pytest.mark.usefixtures("plan_fetchers")
 async def test_usage_success_balance_only(orch: Orchestrator) -> None:
     _enable_deepseek(orch)
     session = _FakeSession(_FakeResp(200, _BALANCE_OK))
@@ -320,6 +337,7 @@ async def test_usage_success_balance_only(orch: Orchestrator) -> None:
     assert "sk-test-key" not in result.text
 
 
+@pytest.mark.usefixtures("plan_fetchers")
 async def test_usage_success_with_today_consumption(orch: Orchestrator) -> None:
     _enable_deepseek(orch)
     snap_dir = orch.paths.workspace / "skills" / "personal-assistant"
@@ -336,6 +354,7 @@ async def test_usage_success_with_today_consumption(orch: Orchestrator) -> None:
     assert "今日消费: ¥11.50" in result.text
 
 
+@pytest.mark.usefixtures("plan_fetchers")
 async def test_usage_http_error(orch: Orchestrator) -> None:
     _enable_deepseek(orch)
     session = _FakeSession(_FakeResp(401, None))
@@ -344,6 +363,7 @@ async def test_usage_http_error(orch: Orchestrator) -> None:
     assert "HTTP 401" in result.text
 
 
+@pytest.mark.usefixtures("plan_fetchers")
 async def test_usage_network_error(orch: Orchestrator) -> None:
     _enable_deepseek(orch)
     session = _FakeSession(_FakeResp(200, _BALANCE_OK), raise_on_enter=aiohttp.ClientError("boom"))
@@ -352,12 +372,42 @@ async def test_usage_network_error(orch: Orchestrator) -> None:
     assert "网络异常" in result.text
 
 
+@pytest.mark.usefixtures("plan_fetchers")
 async def test_usage_missing_balance_infos(orch: Orchestrator) -> None:
     _enable_deepseek(orch)
     session = _FakeSession(_FakeResp(200, {"is_available": False, "balance_infos": []}))
     with patch(_SESSION_PATCH, return_value=session):
         result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
     assert "未返回可用余额" in result.text
+
+
+async def test_usage_includes_claude_and_codex_plan(
+    orch: Orchestrator, plan_fetchers: tuple[AsyncMock, AsyncMock]
+) -> None:
+    _enable_deepseek(orch)
+    claude, codex = plan_fetchers
+    claude.return_value = PlanUsage(
+        "claude", ok=True, plan="pro", five_hour_pct=49.0, weekly_pct=21.0
+    )
+    codex.return_value = PlanUsage("codex", ok=True, plan="plus", five_hour_pct=1.0, weekly_pct=1.0)
+    session = _FakeSession(_FakeResp(200, _BALANCE_OK))
+    with patch(_SESSION_PATCH, return_value=session):
+        result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+    assert "🤖 Claude Code (pro)" in result.text
+    assert "5h 49%" in result.text
+    assert "本周 21%" in result.text
+    assert "🧠 Codex (plus)" in result.text
+
+
+async def test_usage_plan_errors_are_friendly(
+    orch: Orchestrator, plan_fetchers: tuple[AsyncMock, AsyncMock]
+) -> None:
+    claude, codex = plan_fetchers
+    claude.return_value = PlanUsage("claude", ok=False, error="expired")
+    codex.return_value = PlanUsage("codex", ok=False, error="no_auth")
+    result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+    assert "🤖 Claude Code: 登录已过期" in result.text
+    assert "🧠 Codex: 未登录" in result.text
 
 
 def test_deepseek_balance_url_derivation() -> None:
