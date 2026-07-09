@@ -28,6 +28,7 @@ DIRECT_COMMANDS: frozenset[str] = frozenset(
 ORCHESTRATOR_COMMANDS: frozenset[str] = frozenset(
     {
         "status",
+        "usage",
         "model",
         "memory",
         "cron",

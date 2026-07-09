@@ -22,6 +22,7 @@ def get_bot_commands() -> list[tuple[str, str]]:
         ("interrupt", t_cmd("bot.interrupt")),
         ("model", t_cmd("bot.model")),
         ("status", t_cmd("bot.status")),
+        ("usage", t_cmd("bot.usage")),
         ("memory", t_cmd("bot.memory")),
         # Automation & multi-agent
         ("session", t_cmd("bot.session")),

@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from typing import Self
 from unittest.mock import AsyncMock, patch
+
+import aiohttp
 
 from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.orchestrator.commands import (
+    _deepseek_balance_url,
+    _parse_total_balance,
     cmd_cron,
     cmd_diagnose,
     cmd_memory,
     cmd_model,
     cmd_status,
+    cmd_usage,
 )
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.session.key import SessionKey
@@ -234,3 +241,137 @@ async def test_model_unknown_name(orch: Orchestrator) -> None:
     assert "totally_fake_model" in result.text
     assert orch._config.model == "totally_fake_model"
     assert orch._config.provider == "codex"
+
+
+# -- cmd_usage (DeepSeek balance) --
+
+
+class _FakeResp:
+    """Minimal async-context stand-in for an aiohttp response."""
+
+    def __init__(self, status: int, payload: object) -> None:
+        self.status = status
+        self._payload = payload
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    async def json(self, content_type: object = None) -> object:
+        return self._payload
+
+
+class _FakeSession:
+    """Minimal async-context stand-in for aiohttp.ClientSession."""
+
+    def __init__(self, resp: _FakeResp, raise_on_enter: Exception | None = None) -> None:
+        self._resp = resp
+        self._raise = raise_on_enter
+
+    async def __aenter__(self) -> Self:
+        if self._raise is not None:
+            raise self._raise
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    def get(self, url: str) -> _FakeResp:
+        return self._resp
+
+
+_SESSION_PATCH = "ductor_bot.orchestrator.commands.aiohttp.ClientSession"
+
+_BALANCE_OK = {
+    "is_available": True,
+    "balance_infos": [
+        {
+            "currency": "CNY",
+            "total_balance": "88.50",
+            "granted_balance": "8.50",
+            "topped_up_balance": "80.00",
+        }
+    ],
+}
+
+
+def _enable_deepseek(orch: Orchestrator) -> None:
+    orch.config.deepseek.enabled = True
+    orch.config.deepseek.api_key = "sk-test-key"
+
+
+async def test_usage_disabled_when_no_key(orch: Orchestrator) -> None:
+    result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+    assert "未启用" in result.text
+    assert "sk-test" not in result.text
+
+
+async def test_usage_success_balance_only(orch: Orchestrator) -> None:
+    _enable_deepseek(orch)
+    session = _FakeSession(_FakeResp(200, _BALANCE_OK))
+    with patch(_SESSION_PATCH, return_value=session):
+        result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+    assert "¥88.50" in result.text
+    assert "今日消费" not in result.text  # no snapshot file present
+    assert "sk-test-key" not in result.text
+
+
+async def test_usage_success_with_today_consumption(orch: Orchestrator) -> None:
+    _enable_deepseek(orch)
+    snap_dir = orch.paths.workspace / "skills" / "personal-assistant"
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC).isoformat()
+    (snap_dir / ".balance_snapshots.json").write_text(
+        json.dumps([{"label": "morning", "timestamp": now, "balance": 100.0}]),
+        encoding="utf-8",
+    )
+    session = _FakeSession(_FakeResp(200, _BALANCE_OK))
+    with patch(_SESSION_PATCH, return_value=session):
+        result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+    assert "¥88.50" in result.text
+    assert "今日消费: ¥11.50" in result.text
+
+
+async def test_usage_http_error(orch: Orchestrator) -> None:
+    _enable_deepseek(orch)
+    session = _FakeSession(_FakeResp(401, None))
+    with patch(_SESSION_PATCH, return_value=session):
+        result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+    assert "HTTP 401" in result.text
+
+
+async def test_usage_network_error(orch: Orchestrator) -> None:
+    _enable_deepseek(orch)
+    session = _FakeSession(_FakeResp(200, _BALANCE_OK), raise_on_enter=aiohttp.ClientError("boom"))
+    with patch(_SESSION_PATCH, return_value=session):
+        result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+    assert "网络异常" in result.text
+
+
+async def test_usage_missing_balance_infos(orch: Orchestrator) -> None:
+    _enable_deepseek(orch)
+    session = _FakeSession(_FakeResp(200, {"is_available": False, "balance_infos": []}))
+    with patch(_SESSION_PATCH, return_value=session):
+        result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+    assert "未返回可用余额" in result.text
+
+
+def test_deepseek_balance_url_derivation() -> None:
+    assert (
+        _deepseek_balance_url("https://api.deepseek.com/anthropic")
+        == "https://api.deepseek.com/user/balance"
+    )
+    assert _deepseek_balance_url("") == "https://api.deepseek.com/user/balance"
+    assert (
+        _deepseek_balance_url("https://proxy.example.com/anthropic/v1")
+        == "https://proxy.example.com/user/balance"
+    )
+
+
+def test_parse_total_balance() -> None:
+    assert _parse_total_balance(_BALANCE_OK) == 88.5
+    assert _parse_total_balance({"balance_infos": []}) is None
+    assert _parse_total_balance({"balance_infos": [{"total_balance": "nope"}]}) is None
+    assert _parse_total_balance("garbage") is None

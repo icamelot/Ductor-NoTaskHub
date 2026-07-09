@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
+
+import aiohttp
 
 from ductor_bot.cli.auth import check_all_auth
 from ductor_bot.i18n import t
@@ -22,6 +27,7 @@ from ductor_bot.workspace.loader import read_mainmemory
 if TYPE_CHECKING:
     from ductor_bot.orchestrator.core import Orchestrator
     from ductor_bot.session.key import SessionKey
+    from ductor_bot.workspace.paths import DuctorPaths
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +55,59 @@ async def cmd_status(orch: Orchestrator, key: SessionKey, _text: str) -> Orchest
     """Handle /status."""
     logger.info("Status requested")
     return OrchestratorResult(text=await _build_status(orch, key))
+
+
+_USAGE_HEADER = "🐳 DeepSeek 余额"
+_DEEPSEEK_TIMEOUT = aiohttp.ClientTimeout(total=10)
+# Personal-assistant skill's balance snapshot file (relative to the workspace).
+# Optional: only present when that skill is installed, so reads are best-effort.
+_BALANCE_SNAPSHOT_REL = ("skills", "personal-assistant", ".balance_snapshots.json")
+
+
+async def cmd_usage(orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
+    """Handle /usage: show the DeepSeek account balance (and today's spend)."""
+    logger.info("Usage (DeepSeek balance) requested")
+    ds = orch.config.deepseek
+    if not ds.enabled or not ds.api_key:
+        return OrchestratorResult(
+            text=(
+                f"{_USAGE_HEADER}\n"
+                "DeepSeek 未启用或未配置 API key。\n"
+                "请在 `~/.ductor/config/config.json` 的 `deepseek` 段中设置 "
+                "`enabled: true` 并填入 `api_key`。"
+            ),
+        )
+
+    url = _deepseek_balance_url(ds.base_url)
+    headers = {"Authorization": f"Bearer {ds.api_key}", "Accept": "application/json"}
+    try:
+        async with (
+            aiohttp.ClientSession(timeout=_DEEPSEEK_TIMEOUT, headers=headers) as session,
+            session.get(url) as resp,
+        ):
+            status = resp.status
+            data = await resp.json(content_type=None) if status == 200 else None
+    except (aiohttp.ClientError, TimeoutError, ValueError):
+        logger.warning("DeepSeek balance query failed", exc_info=True)
+        return OrchestratorResult(text=f"{_USAGE_HEADER}\n查询余额时网络异常或超时。请稍后再试。")
+
+    if data is None:
+        return OrchestratorResult(
+            text=f"{_USAGE_HEADER}\n查询失败: HTTP {status}。请检查 API key 是否有效或稍后再试。",
+        )
+
+    balance = _parse_total_balance(data)
+    if balance is None:
+        return OrchestratorResult(text=f"{_USAGE_HEADER}\nDeepSeek 未返回可用余额信息。")
+
+    lines = [f"🐳 DeepSeek 余额: ¥{balance:.2f}"]
+    spent = await asyncio.to_thread(_today_consumption, orch.paths, balance)
+    if spent is not None:
+        if spent >= 0:
+            lines.append(f"📉 今日消费: ¥{spent:.2f}")
+        else:
+            lines.append(f"📈 今日充值: ¥{abs(spent):.2f}")
+    return OrchestratorResult(text="\n".join(lines))
 
 
 async def cmd_model(orch: Orchestrator, key: SessionKey, text: str) -> OrchestratorResult:
@@ -261,6 +320,96 @@ async def cmd_diagnose(orch: Orchestrator, _key: SessionKey, _text: str) -> Orch
 
 
 # -- Helpers ------------------------------------------------------------------
+
+
+def _deepseek_balance_url(base_url: str) -> str:
+    """Derive the balance endpoint from the Anthropic-compatible base URL.
+
+    ``base_url`` is typically ``https://api.deepseek.com/anthropic``; the balance
+    endpoint lives at the domain root (``/user/balance``), so only scheme + host
+    are reused.
+    """
+    parts = urlsplit(base_url or "https://api.deepseek.com")
+    scheme = parts.scheme or "https"
+    netloc = parts.netloc or "api.deepseek.com"
+    return f"{scheme}://{netloc}/user/balance"
+
+
+def _parse_total_balance(data: object) -> float | None:
+    """Extract ``balance_infos[0].total_balance`` as a float, or None on any gap."""
+    if not isinstance(data, dict):
+        return None
+    infos = data.get("balance_infos")
+    if not isinstance(infos, list) or not infos:
+        return None
+    first = infos[0]
+    if not isinstance(first, dict):
+        return None
+    try:
+        return float(str(first.get("total_balance")))
+    except ValueError:
+        return None
+
+
+def _parse_ts(ts: str) -> datetime:
+    """Parse an ISO timestamp, returning the epoch on failure."""
+    try:
+        return datetime.fromisoformat(ts)
+    except ValueError:
+        return datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _load_balance_snapshots(paths: DuctorPaths) -> list[object]:
+    """Read the personal-assistant skill's snapshot list, or [] if unavailable.
+
+    The file is optional (only present when that skill is installed), so any
+    read/parse problem degrades gracefully to an empty list.
+    """
+    snapshot_file = paths.workspace.joinpath(*_BALANCE_SNAPSHOT_REL)
+    try:
+        raw = snapshot_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return []
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _reference_snapshot(snapshots: list[object]) -> dict[str, object] | None:
+    """Pick today's first snapshot, else the most recent one before today."""
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_first: dict[str, object] | None = None
+    yesterday_last: dict[str, object] | None = None
+    for snap in snapshots:
+        if not isinstance(snap, dict):
+            continue
+        ts = _parse_ts(str(snap.get("timestamp", "")))
+        if ts >= today_start:
+            if today_first is None or ts < _parse_ts(str(today_first.get("timestamp", ""))):
+                today_first = snap
+        elif yesterday_last is None or ts > _parse_ts(str(yesterday_last.get("timestamp", ""))):
+            yesterday_last = snap
+    return today_first or yesterday_last
+
+
+def _today_consumption(paths: DuctorPaths, current_balance: float) -> float | None:
+    """Best-effort today's spend: (today's first snapshot balance) minus current.
+
+    Returns None when no usable snapshot exists (e.g. the skill isn't installed),
+    so the balance still renders on machines without it.
+    """
+    ref = _reference_snapshot(_load_balance_snapshots(paths))
+    if ref is None:
+        return None
+    try:
+        ref_balance = float(str(ref.get("balance")))
+    except ValueError:
+        return None
+    return ref_balance - current_balance
 
 
 def _build_agent_health_block(orch: Orchestrator) -> str:
