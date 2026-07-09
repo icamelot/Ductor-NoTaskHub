@@ -126,11 +126,15 @@ async def _deepseek_block(orch: Orchestrator, tz: ZoneInfo) -> str:
 
 
 def _reset_suffix(reset: datetime | None, tz: ZoneInfo, *, time_only: bool) -> str:
-    """Render a compact reset-time hint for a usage window."""
+    """Render a compact reset-time hint for a usage window.
+
+    The 5h window resets within the day (show ``HH:MM``); the weekly window
+    resets on a future date, shown down to the hour (``MM-DD HH:MM``).
+    """
     if reset is None:
         return ""
     local = reset.astimezone(tz)
-    return f"  重置 {local:%H:%M}" if time_only else f"  重置 {local:%m-%d}"
+    return f"  重置 {local:%H:%M}" if time_only else f"  重置 {local:%m-%d %H:%M}"
 
 
 def _format_plan_usage(usage: PlanUsage, label: str, tz: ZoneInfo) -> str:
