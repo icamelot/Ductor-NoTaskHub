@@ -134,7 +134,7 @@ def _reset_suffix(reset: datetime | None, tz: ZoneInfo, *, time_only: bool) -> s
     if reset is None:
         return ""
     local = reset.astimezone(tz)
-    return f"  重置 {local:%H:%M}" if time_only else f"  重置 {local:%m-%d %H:%M}"
+    return f"  重置 {local:%H:%M}" if time_only else f"  重置 {local:%H:%M %m-%d}"
 
 
 def _format_plan_usage(usage: PlanUsage, label: str, tz: ZoneInfo) -> str:
@@ -148,7 +148,7 @@ def _format_plan_usage(usage: PlanUsage, label: str, tz: ZoneInfo) -> str:
         rows.append(f"  ⏱️ 5h {usage.five_hour_pct:.0f}%{suffix}")
     if usage.weekly_pct is not None:
         suffix = _reset_suffix(usage.weekly_reset, tz, time_only=False)
-        rows.append(f"  📅 本周 {usage.weekly_pct:.0f}%{suffix}")
+        rows.append(f"  📅 7d {usage.weekly_pct:.0f}%{suffix}")
     if not rows:
         return f"{label}: 无数据"
     return header + "\n" + "\n".join(rows)

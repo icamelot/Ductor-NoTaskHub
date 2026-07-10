@@ -395,7 +395,7 @@ async def test_usage_includes_claude_and_codex_plan(
         result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
     assert "✴️ Claude Code (pro)" in result.text
     assert "5h 49%" in result.text
-    assert "本周 21%" in result.text
+    assert "7d 21%" in result.text
     assert "🤖 Codex (plus)" in result.text
 
 
