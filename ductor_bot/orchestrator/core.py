@@ -130,6 +130,7 @@ class Orchestrator:
         interagent_port: int = 8799,
     ) -> None:
         self._config = config
+        self._agent_name = agent_name
         self._paths: DuctorPaths = paths
         self._docker: DockerManager | None = None
         self._providers = ProviderManager(config)

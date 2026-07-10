@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from ductor_bot.bus.bus import MessageBus
 from ductor_bot.cleanup import CleanupObserver
 from ductor_bot.cli.antigravity_cache_observer import AntigravityCacheObserver
+from ductor_bot.cli.claude_token_keepalive import watch_claude_token
 from ductor_bot.cli.codex_cache import CodexModelCache
 from ductor_bot.cli.codex_cache_observer import CodexCacheObserver
 from ductor_bot.cli.gemini_cache_observer import GeminiCacheObserver
@@ -58,6 +59,7 @@ class ObserverManager:
         self._config_reloader: ConfigReloader | None = None
         self._rule_sync_task: asyncio.Task[None] | None = None
         self._skill_sync_task: asyncio.Task[None] | None = None
+        self._claude_token_task: asyncio.Task[None] | None = None
 
     # -- Model cache initialization -------------------------------------------
 
@@ -123,8 +125,15 @@ class ObserverManager:
 
     # -- Start / stop ---------------------------------------------------------
 
-    async def start_all(self, *, docker_container: str = "") -> None:
-        """Start all observers and background watchers."""
+    async def start_all(
+        self, *, docker_container: str = "", run_token_keepalive: bool = False
+    ) -> None:
+        """Start all observers and background watchers.
+
+        ``run_token_keepalive`` should be True only for the main agent — the
+        Claude login-token refresh must have a single runner per host to avoid
+        racing the rotating refresh token.
+        """
         if self.cron:
             await self.cron.start()
         await self.heartbeat.start()
@@ -139,6 +148,10 @@ class ObserverManager:
             watch_skill_sync(self._paths, docker_active=bool(docker_container))
         )
         logger.info("Skill sync watcher started")
+
+        if run_token_keepalive and self._config.claude_token_keepalive:
+            self._claude_token_task = asyncio.create_task(watch_claude_token())
+            logger.info("Claude token keep-alive started")
 
     async def start_config_reloader(
         self,
@@ -176,7 +189,7 @@ class ObserverManager:
         if self.antigravity_cache_obs:
             await self.antigravity_cache_obs.stop()
             self.antigravity_cache_obs = None
-        for task in (self._rule_sync_task, self._skill_sync_task):
+        for task in (self._rule_sync_task, self._skill_sync_task, self._claude_token_task):
             if task and not task.done():
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

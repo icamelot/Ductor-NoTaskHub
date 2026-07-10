@@ -445,6 +445,9 @@ class AgentConfig(BaseModel):
     session_age_warning_hours: int = 12
     daily_reset_hour: int = 4
     daily_reset_enabled: bool = False
+    # Keep the Claude Code login token (used by /usage) fresh on the host so it
+    # doesn't expire when ductor mostly drives DeepSeek/Codex. Main agent only.
+    claude_token_keepalive: bool = True
     max_budget_usd: float | None = None
     max_turns: int | None = None
     max_session_messages: int | None = None
