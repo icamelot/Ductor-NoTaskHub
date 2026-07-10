@@ -145,10 +145,10 @@ def _format_plan_usage(usage: PlanUsage, label: str, tz: ZoneInfo) -> str:
     rows: list[str] = []
     if usage.five_hour_pct is not None:
         suffix = _reset_suffix(usage.five_hour_reset, tz, time_only=True)
-        rows.append(f"  5h {usage.five_hour_pct:.0f}%{suffix}")
+        rows.append(f"  ⏱️ 5h {usage.five_hour_pct:.0f}%{suffix}")
     if usage.weekly_pct is not None:
         suffix = _reset_suffix(usage.weekly_reset, tz, time_only=False)
-        rows.append(f"  本周 {usage.weekly_pct:.0f}%{suffix}")
+        rows.append(f"  📅 本周 {usage.weekly_pct:.0f}%{suffix}")
     if not rows:
         return f"{label}: 无数据"
     return header + "\n" + "\n".join(rows)
