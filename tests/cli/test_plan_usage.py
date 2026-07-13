@@ -27,8 +27,16 @@ _CLAUDE_SAMPLE = {
 _CODEX_SAMPLE = {
     "plan_type": "plus",
     "rate_limit": {
-        "primary_window": {"used_percent": 1, "reset_at": 1783611755},
-        "secondary_window": {"used_percent": 1, "reset_at": 1784177180},
+        "primary_window": {
+            "used_percent": 1,
+            "limit_window_seconds": 18000,
+            "reset_at": 1783611755,
+        },
+        "secondary_window": {
+            "used_percent": 1,
+            "limit_window_seconds": 604800,
+            "reset_at": 1784177180,
+        },
     },
 }
 
@@ -118,6 +126,40 @@ def test_parse_codex_usage() -> None:
     assert usage.weekly_pct == 1.0
     assert usage.five_hour_reset is not None
     assert usage.weekly_reset is not None
+
+
+def test_parse_codex_usage_no_5h_window() -> None:
+    """Codex dropped the 5h window: only the weekly window is present."""
+    data = {
+        "plan_type": "plus",
+        "rate_limit": {
+            "secondary_window": {
+                "used_percent": 5,
+                "limit_window_seconds": 604800,
+                "reset_at": 1784177180,
+            }
+        },
+    }
+    usage = _parse_codex_usage(data)
+    assert usage.ok
+    assert usage.five_hour_pct is None
+    assert usage.weekly_pct == 5.0
+
+
+def test_parse_codex_usage_weekly_in_primary_slot() -> None:
+    """Weekly window is classified by length even if it lands in primary_window."""
+    data = {
+        "rate_limit": {
+            "primary_window": {
+                "used_percent": 7,
+                "limit_window_seconds": 604800,
+                "reset_at": 1784177180,
+            }
+        }
+    }
+    usage = _parse_codex_usage(data)
+    assert usage.five_hour_pct is None
+    assert usage.weekly_pct == 7.0
 
 
 # -- token loading --

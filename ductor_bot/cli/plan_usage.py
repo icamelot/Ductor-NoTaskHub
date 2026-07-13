@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = aiohttp.ClientTimeout(total=10)
 _CLAUDE_USAGE_URL = "https://claude.ai/api/oauth/usage"
 _CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+# Codex rate-limit windows are classified by length: <= 1 day is the "5h"
+# short window; anything longer (e.g. 604800s = 7d) is the weekly window.
+_SHORT_WINDOW_MAX_SEC = 86400
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,24 +139,48 @@ def _parse_claude_usage(data: object, plan: str) -> PlanUsage:
     )
 
 
+def _is_short_window(window: dict[object, object]) -> bool:
+    """True if a Codex rate-limit window is the ~5h (short) window."""
+    secs = window.get("limit_window_seconds")
+    if not isinstance(secs, (int, float)) or isinstance(secs, bool):
+        return False  # no length -> treat as the weekly window
+    return secs <= _SHORT_WINDOW_MAX_SEC
+
+
 def _parse_codex_usage(data: object) -> PlanUsage:
     if not isinstance(data, dict):
         return PlanUsage("codex", ok=False, error="error")
     plan = str(data.get("plan_type", ""))
     raw_rl = data.get("rate_limit")
     rl = raw_rl if isinstance(raw_rl, dict) else {}
-    raw_prim = rl.get("primary_window")
-    prim = raw_prim if isinstance(raw_prim, dict) else {}
-    raw_sec = rl.get("secondary_window")
-    sec = raw_sec if isinstance(raw_sec, dict) else {}
+
+    five_pct: float | None = None
+    weekly_pct: float | None = None
+    five_reset: datetime | None = None
+    weekly_reset: datetime | None = None
+    # Classify each window by length, not position: the 5h window may be gone,
+    # and the weekly window can occupy either slot. A window without a length
+    # defaults to weekly, so a lone window still shows as 7d.
+    for window in rl.values():
+        if not isinstance(window, dict):
+            continue
+        pct = _as_float(window.get("used_percent"))
+        if pct is None:
+            continue
+        reset = _epoch_to_dt(window.get("reset_at"))
+        if _is_short_window(window):
+            five_pct, five_reset = pct, reset
+        else:
+            weekly_pct, weekly_reset = pct, reset
+
     return PlanUsage(
         "codex",
         ok=True,
         plan=plan,
-        five_hour_pct=_as_float(prim.get("used_percent")),
-        weekly_pct=_as_float(sec.get("used_percent")),
-        five_hour_reset=_epoch_to_dt(prim.get("reset_at")),
-        weekly_reset=_epoch_to_dt(sec.get("reset_at")),
+        five_hour_pct=five_pct,
+        weekly_pct=weekly_pct,
+        five_hour_reset=five_reset,
+        weekly_reset=weekly_reset,
     )
 
 
