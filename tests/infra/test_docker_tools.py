@@ -31,9 +31,7 @@ def test_dockerfile_declares_buildkit_frontend_and_development_layer() -> None:
     assert content.startswith("# syntax=docker/dockerfile:1.7\n")
     assert content.count(_DEVELOPMENT_MARKER) == 1
     assert content.index(_DEVELOPMENT_MARKER) < content.index(DOCKER_EXTRAS_MARKER)
-    assert content.index(DOCKER_EXTRAS_MARKER) < content.index(
-        "ARG CLAUDE_CLI_VERSION"
-    )
+    assert content.index(DOCKER_EXTRAS_MARKER) < content.index("ARG CLAUDE_CLI_VERSION")
 
 
 def test_development_layer_contains_exact_approved_tools_and_caches() -> None:
@@ -114,9 +112,7 @@ def test_document_and_provider_layers_keep_cache_order() -> None:
 
     assert content.index(_DEVELOPMENT_MARKER) < content.index(_DOCUMENT_MARKER)
     assert content.index(_DOCUMENT_MARKER) < content.index(DOCKER_EXTRAS_MARKER)
-    assert content.index(DOCKER_EXTRAS_MARKER) < content.index(
-        "ARG CLAUDE_CLI_VERSION"
-    )
+    assert content.index(DOCKER_EXTRAS_MARKER) < content.index("ARG CLAUDE_CLI_VERSION")
 
 
 def test_playwright_extra_stays_python_only() -> None:
