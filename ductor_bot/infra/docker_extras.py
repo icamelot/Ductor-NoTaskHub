@@ -207,9 +207,13 @@ def extras_for_display() -> list[tuple[str, list[DockerExtra]]]:
     return [(cat, by_cat[cat]) for cat in EXTRA_CATEGORIES if cat in by_cat]
 
 
+_MIN_BUILD_TIMEOUT_SECONDS = 2400
+
+
 def calculate_build_timeout(extras: list[DockerExtra], base: int = 300) -> int:
-    """Return total build timeout in seconds."""
-    return base + sum(e.build_timeout_extra for e in extras)
+    """Return a bounded Docker build timeout in seconds."""
+    calculated = base + sum(extra.build_timeout_extra for extra in extras)
+    return max(_MIN_BUILD_TIMEOUT_SECONDS, calculated)
 
 
 def generate_dockerfile_extras(base_content: str, extras: list[DockerExtra]) -> str:

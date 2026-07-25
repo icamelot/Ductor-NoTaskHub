@@ -229,18 +229,30 @@ class TestGenerateDockerfile:
 
 
 class TestBuildTimeout:
-    def test_base_only(self) -> None:
-        assert calculate_build_timeout([]) == 300
+    def test_base_only_uses_full_tool_build_floor(self) -> None:
+        assert calculate_build_timeout([]) == 2400
 
-    def test_custom_base(self) -> None:
-        assert calculate_build_timeout([], base=100) == 100
+    def test_custom_base_below_floor_uses_floor(self) -> None:
+        assert calculate_build_timeout([], base=100) == 2400
 
-    def test_with_extras(self) -> None:
+    def test_with_normal_extras_uses_floor(self) -> None:
         extras = resolve_extras(["whisper"])
-        timeout = calculate_build_timeout(extras)
-        # whisper (120) + ffmpeg (0)
-        assert timeout == 300 + 120
 
+        assert calculate_build_timeout(extras) == 2400
+
+    def test_large_dynamic_timeout_can_exceed_floor(self) -> None:
+        extras = [
+            DockerExtra(
+                id="slow",
+                name="Slow",
+                description="Slow test package",
+                category="ML Frameworks",
+                size_estimate="test-only",
+                build_timeout_extra=2500,
+            )
+        ]
+
+        assert calculate_build_timeout(extras) == 2800
 
 # ---------------------------------------------------------------------------
 # DockerConfig extras field
@@ -525,4 +537,4 @@ class TestDockerManagerExtras:
         with patch.object(mgr, "_exec_stream", side_effect=mock_exec):
             await mgr._build_image("test-img", provider_versions)
 
-        assert captured_timeout == 300 + 180
+        assert captured_timeout == 2400
