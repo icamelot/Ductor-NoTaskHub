@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ductor_bot.config import DockerConfig
 from ductor_bot.i18n import t_rich
 from ductor_bot.workspace.paths import resolve_paths
 
@@ -65,7 +68,7 @@ def print_docker_help() -> None:
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column(style="bold green", min_width=36)
     table.add_column()
-    table.add_row("ductor docker rebuild", "Remove container & image, rebuild on next start")
+    table.add_row("ductor docker rebuild", "Build, verify, and deploy a refreshed image")
     table.add_row("ductor docker enable", "Enable Docker sandboxing")
     table.add_row("ductor docker disable", "Disable Docker sandboxing")
     table.add_row("ductor docker mount <path>", "Mount a host directory into the sandbox")
@@ -139,34 +142,91 @@ def docker_set_enabled(*, enabled: bool) -> None:
     _console.print(t_rich("docker.restart_hint"))
 
 
-def docker_rebuild() -> None:
-    """Stop bot, remove container and image, so they get rebuilt on restart."""
+def _runtime_is_running() -> bool:
+    from ductor_bot.infra.service import is_service_installed, is_service_running
+
+    if is_service_installed() and is_service_running():
+        return True
+    pid_file = resolve_paths().ductor_home / "bot.pid"
+    if not pid_file.is_file():
+        return False
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    from ductor_bot.infra.pidlock import _is_process_alive
+
+    return _is_process_alive(pid)
+
+
+def _stop_runtime_for_rebuild() -> None:
     from ductor_bot.cli_commands.lifecycle import stop_bot
+
+    stop_bot()
+
+
+def _start_runtime_for_rebuild() -> None:
+    from ductor_bot.infra.service import is_service_installed, start_service
+
+    if is_service_installed():
+        start_service(_console)
+        return
+    subprocess.Popen(
+        [sys.executable, "-m", "ductor_bot"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def docker_rebuild() -> None:
+    """Build, verify, and deploy a candidate Docker image."""
+    from ductor_bot.infra.docker_rebuild import rebuild_docker_image
 
     if not shutil.which("docker"):
         _console.print("[bold red]Docker not found.[/bold red]")
-        return
+        raise SystemExit(1)
 
     result = docker_read_config()
-    container = "ductor-sandbox"
-    image = "ductor-sandbox"
-    if result is not None:
-        _, data = result
-        docker = data.get("docker", {})
-        if isinstance(docker, dict):
-            container = str(docker.get("container_name", container))
-            image = str(docker.get("image_name", image))
+    if result is None:
+        raise SystemExit(1)
+    _, data = result
+    raw = data.get("docker")
+    if not isinstance(raw, dict):
+        _console.print("[bold red]Invalid Docker configuration.[/bold red]")
+        raise SystemExit(1)
+    try:
+        config = DockerConfig.model_validate(raw)
+    except ValueError:
+        _console.print("[bold red]Invalid Docker configuration.[/bold red]")
+        raise SystemExit(1) from None
+    if not config.enabled:
+        _console.print("[bold red]Docker sandboxing is not enabled.[/bold red]")
+        raise SystemExit(1)
 
-    _console.print(t_rich("docker.rebuild.stopping"))
-    stop_bot()
-
-    _console.print(t_rich("docker.rebuild.removing_container", name=container))
-    subprocess.run(["docker", "rm", "-f", container], capture_output=True, check=False)
-
-    _console.print(t_rich("docker.rebuild.removing_image", name=image))
-    subprocess.run(["docker", "rmi", image], capture_output=True, check=False)
+    was_running = _runtime_is_running()
+    try:
+        outcome = asyncio.run(
+            rebuild_docker_image(
+                config,
+                resolve_paths(),
+                runtime_was_running=was_running,
+                stop_runtime=_stop_runtime_for_rebuild,
+                start_runtime=_start_runtime_for_rebuild,
+            )
+        )
+    except Exception as exc:
+        _console.print(f"[bold red]Docker rebuild failed:[/bold red] {exc}")
+        raise SystemExit(1) from None
 
     _console.print(t_rich("docker.rebuild.done"))
+    _console.print(
+        "[dim]"
+        f"candidate={outcome.candidate_ref} "
+        f"image={outcome.candidate_image_id} "
+        f"codex={outcome.codex_version}"
+        "[/dim]"
+    )
 
 
 def _expand_path(raw: str) -> Path:
