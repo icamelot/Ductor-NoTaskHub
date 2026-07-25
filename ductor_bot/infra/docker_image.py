@@ -4,6 +4,7 @@ import json
 import re
 import secrets
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -34,6 +35,19 @@ class ProviderCliVersions:
             ("CODEX_CLI_VERSION", self.codex),
             ("GEMINI_CLI_VERSION", self.gemini),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class DockerContainerRef:
+    id: str
+    name: str
+    image_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class DockerContainerState:
+    image_id: str
+    running: bool
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -176,3 +190,114 @@ def remove_image_tag(
         raise RuntimeError(
             f"Docker image tag removal failed (exit code {result.returncode})"
         )
+
+
+def _canonical_image_id(value: str, *, context: str) -> str:
+    if _IMAGE_ID_PATTERN.fullmatch(value) is None:
+        raise RuntimeError(f"{context}: invalid immutable image ID")
+    return value
+
+
+def list_direct_image_containers(
+    image_id: str,
+    *,
+    runner: CommandRunner = _run,
+) -> list[DockerContainerRef]:
+    expected = _canonical_image_id(image_id, context="Unable to list image containers")
+    listed = runner(["docker", "ps", "-aq"])
+    if listed.returncode != 0:
+        raise RuntimeError(
+            f"Unable to list Docker containers (exit code {listed.returncode})"
+        )
+    ids = listed.stdout.split()
+    if not ids:
+        return []
+    args = ["docker", "inspect", "--format", "{{.Name}}\t{{.Image}}", *ids]
+    inspected = runner(args)
+    if inspected.returncode != 0:
+        raise RuntimeError(
+            f"Unable to inspect Docker containers (exit code {inspected.returncode})"
+        )
+    lines = inspected.stdout.splitlines()
+    if len(lines) != len(ids):
+        raise RuntimeError("Docker inspect returned an unexpected container count")
+
+    refs: list[DockerContainerRef] = []
+    for container_id, line in zip(ids, lines, strict=True):
+        if line.count("\t") != 1:
+            raise RuntimeError("Docker inspect returned invalid container metadata")
+        raw_name, raw_image_id = line.split("\t")
+        name = raw_name.removeprefix("/")
+        actual = _canonical_image_id(
+            raw_image_id,
+            context="Docker inspect returned invalid container metadata",
+        )
+        if not name or name != name.strip():
+            raise RuntimeError("Docker inspect returned invalid container metadata")
+        if actual == expected:
+            refs.append(DockerContainerRef(container_id, name, actual))
+    return refs
+
+
+def remove_containers(
+    containers: list[DockerContainerRef],
+    *,
+    runner: CommandRunner = _run,
+) -> None:
+    for container in containers:
+        result = runner(["docker", "rm", "-f", container.id])
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Unable to remove Docker container (exit code {result.returncode})"
+            )
+
+
+def inspect_container_state(
+    name: str,
+    *,
+    runner: CommandRunner = _run,
+) -> DockerContainerState | None:
+    args = [
+        "docker",
+        "inspect",
+        name,
+        "--format",
+        "{{.Image}}\t{{.State.Running}}",
+    ]
+    result = runner(args)
+    if result.returncode != 0:
+        return None
+    if result.stdout.strip().count("\t") != 1:
+        raise RuntimeError("Docker inspect returned invalid container state")
+    raw_image_id, raw_running = result.stdout.strip().split("\t")
+    if raw_running not in {"true", "false"}:
+        raise RuntimeError("Docker inspect returned invalid container state")
+    return DockerContainerState(
+        _canonical_image_id(
+            raw_image_id,
+            context="Docker inspect returned invalid container state",
+        ),
+        raw_running == "true",
+    )
+
+
+def wait_for_container_images(
+    names: tuple[str, ...],
+    expected_image_id: str,
+    *,
+    timeout_seconds: float = 120,
+    poll_seconds: float = 1,
+    runner: CommandRunner = _run,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        states = [inspect_container_state(name, runner=runner) for name in names]
+        if all(
+            state is not None
+            and state.running
+            and state.image_id == expected_image_id
+            for state in states
+        ):
+            return
+        time.sleep(poll_seconds)
+    raise RuntimeError("Docker containers did not reach the candidate image")

@@ -196,3 +196,71 @@ def test_remove_image_tag_sanitizes_failure() -> None:
         remove_image_tag("candidate", runner=runner)
 
     assert secret not in str(exc_info.value)
+
+
+def test_list_direct_image_containers_selects_exact_immutable_id() -> None:
+    from ductor_bot.infra.docker_image import (
+        DockerContainerRef,
+        list_direct_image_containers,
+    )
+
+    old_id = f"sha256:{'a' * 64}"
+    other_id = f"sha256:{'c' * 64}"
+    calls: list[list[str]] = []
+
+    def runner(args: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if args == ["docker", "ps", "-aq"]:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout="c-main\nc-other\nc-bot\n",
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=(
+                f"/ductor-sandbox\t{old_id}\n"
+                f"/unrelated\t{other_id}\n"
+                f"/ductor-sub-botbuilder\t{old_id}\n"
+            ),
+            stderr="",
+        )
+
+    refs = list_direct_image_containers(old_id, runner=runner)
+
+    assert refs == [
+        DockerContainerRef("c-main", "ductor-sandbox", old_id),
+        DockerContainerRef("c-bot", "ductor-sub-botbuilder", old_id),
+    ]
+    assert calls[0] == ["docker", "ps", "-aq"]
+    assert calls[1] == [
+        "docker",
+        "inspect",
+        "--format",
+        "{{.Name}}\t{{.Image}}",
+        "c-main",
+        "c-other",
+        "c-bot",
+    ]
+
+
+def test_inspect_container_state_reads_image_and_running_flag() -> None:
+    from ductor_bot.infra.docker_image import inspect_container_state
+
+    image_id = f"sha256:{'b' * 64}"
+
+    def runner(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=f"{image_id}\ttrue\n",
+            stderr="",
+        )
+
+    state = inspect_container_state("ductor-sandbox", runner=runner)
+
+    assert state is not None
+    assert state.image_id == image_id
+    assert state.running is True
