@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+DOCKER_EXTRAS_MARKER = "# -- Ductor configured extras insertion point --"
+
 
 @dataclass(frozen=True)
 class DockerExtra:
@@ -211,14 +213,25 @@ def calculate_build_timeout(extras: list[DockerExtra], base: int = 300) -> int:
 
 
 def generate_dockerfile_extras(base_content: str, extras: list[DockerExtra]) -> str:
-    """Append ``RUN`` instructions for *extras* to the base Dockerfile content.
+    """Insert ``RUN`` instructions for *extras* before the provider layer.
 
     Groups apt and pip installs for layer efficiency.  Packages that require a
     custom ``--index-url`` (e.g. PyTorch CPU) get a separate ``RUN`` command.
     """
     if not extras:
         return base_content
+    if base_content.count(DOCKER_EXTRAS_MARKER) != 1:
+        raise ValueError("Docker extras marker must appear exactly once")
 
+    block = _render_dockerfile_extras(extras)
+    return base_content.replace(
+        DOCKER_EXTRAS_MARKER,
+        f"{block}\n\n{DOCKER_EXTRAS_MARKER}",
+        1,
+    )
+
+
+def _render_dockerfile_extras(extras: list[DockerExtra]) -> str:
     all_apt: list[str] = []
     # pip packages grouped by index-url (None = default PyPI).
     pip_groups: dict[str | None, list[str]] = {}
@@ -227,13 +240,7 @@ def generate_dockerfile_extras(base_content: str, extras: list[DockerExtra]) -> 
         all_apt.extend(extra.apt_packages)
         _collect_pip(extra.pip_packages, pip_groups)
 
-    lines: list[str] = [
-        base_content.rstrip(),
-        "",
-        "# -- Docker extras (auto-generated) --",
-        "",
-        "USER root",
-    ]
+    lines = ["# -- Docker extras (auto-generated) --", "", "USER root"]
 
     if all_apt:
         apt_joined = " ".join(sorted(set(all_apt)))
@@ -264,10 +271,7 @@ def generate_dockerfile_extras(base_content: str, extras: list[DockerExtra]) -> 
         else:
             lines.append(f"RUN pip install --no-cache-dir {pkg_joined}")
 
-    lines.append("")
-    lines.append("USER node")
-    lines.append("")
-
+    lines.extend(["", "USER node"])
     return "\n".join(lines)
 
 

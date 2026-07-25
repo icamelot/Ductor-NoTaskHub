@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from ductor_bot.config import DockerConfig
 from ductor_bot.infra.docker_extras import (
     DOCKER_EXTRAS,
     DOCKER_EXTRAS_BY_ID,
+    DOCKER_EXTRAS_MARKER,
     EXTRA_CATEGORIES,
     DockerExtra,
     calculate_build_timeout,
@@ -17,6 +20,7 @@ from ductor_bot.infra.docker_extras import (
     generate_dockerfile_extras,
     resolve_extras,
 )
+from ductor_bot.infra.docker_image import ProviderCliVersions
 
 # ---------------------------------------------------------------------------
 # Registry integrity
@@ -107,7 +111,13 @@ class TestResolveExtras:
 # generate_dockerfile_extras
 # ---------------------------------------------------------------------------
 
-_BASE = "FROM ubuntu\nUSER node\n"
+_BASE = (
+    "FROM ubuntu\n"
+    f"{DOCKER_EXTRAS_MARKER}\n"
+    "ARG CODEX_CLI_VERSION\n"
+    "RUN npm install -g @openai/codex@$CODEX_CLI_VERSION\n"
+    "USER node\n"
+)
 
 
 class TestGenerateDockerfile:
@@ -154,10 +164,25 @@ class TestGenerateDockerfile:
         assert "tesseract-ocr" in result
         assert "pytesseract" in result
 
-    def test_preserves_base_content(self) -> None:
-        extras = resolve_extras(["ffmpeg"])
-        result = generate_dockerfile_extras(_BASE, extras)
-        assert result.startswith(_BASE.rstrip())
+    def test_preserves_base_content_around_marker(self) -> None:
+        result = generate_dockerfile_extras(_BASE, resolve_extras(["ffmpeg"]))
+
+        assert result.startswith("FROM ubuntu\n")
+        assert result.count(DOCKER_EXTRAS_MARKER) == 1
+        assert "ARG CODEX_CLI_VERSION" in result
+        assert result.rstrip().endswith("USER node")
+
+    def test_extras_are_inserted_before_provider_layer(self) -> None:
+        result = generate_dockerfile_extras(
+            _BASE, resolve_extras(["playwright", "ffmpeg"])
+        )
+
+        assert result.index("pip install --no-cache-dir playwright") < result.index(
+            "ARG CODEX_CLI_VERSION"
+        )
+        assert result.index("apt-get install") < result.index("ARG CODEX_CLI_VERSION")
+        assert "playwright install" not in result
+        assert "chromium" not in result.lower()
 
     def test_user_switch(self) -> None:
         extras = resolve_extras(["ffmpeg"])
@@ -397,12 +422,21 @@ def _make_docker_paths(tmp_path: Path) -> tuple[Path, object]:
     return fw, paths
 
 
+@pytest.fixture
+def provider_versions() -> ProviderCliVersions:
+    return ProviderCliVersions("2.1.215", "0.144.6", "0.51.0")
+
+
 class TestDockerManagerExtras:
-    async def test_build_image_with_extras(self, tmp_path: Path) -> None:
+    async def test_build_image_with_extras(
+        self,
+        tmp_path: Path,
+        provider_versions: ProviderCliVersions,
+    ) -> None:
         from ductor_bot.infra.docker import DockerManager
 
         fw, paths = _make_docker_paths(tmp_path)
-        (fw / "Dockerfile.sandbox").write_text("FROM ubuntu\nUSER node\n")
+        (fw / "Dockerfile.sandbox").write_text(_BASE)
 
         config = DockerConfig(
             enabled=True,
@@ -423,7 +457,7 @@ class TestDockerManagerExtras:
             return 0, ""
 
         with patch.object(mgr, "_exec_stream", side_effect=mock_exec):
-            result = await mgr._build_image("test-img")
+            result = await mgr._build_image("test-img", provider_versions)
 
         assert result is True
         assert built_content
@@ -431,11 +465,15 @@ class TestDockerManagerExtras:
         assert "pandas" in built_content[0]
         assert "Docker extras" in built_content[0]
 
-    async def test_build_image_without_extras(self, tmp_path: Path) -> None:
+    async def test_build_image_without_extras(
+        self,
+        tmp_path: Path,
+        provider_versions: ProviderCliVersions,
+    ) -> None:
         from ductor_bot.infra.docker import DockerManager
 
         fw, paths = _make_docker_paths(tmp_path)
-        base_content = "FROM ubuntu\nUSER node\n"
+        base_content = _BASE
         (fw / "Dockerfile.sandbox").write_text(base_content)
 
         config = DockerConfig(enabled=True, image_name="test-img", container_name="test-ctr")
@@ -452,18 +490,22 @@ class TestDockerManagerExtras:
             return 0, ""
 
         with patch.object(mgr, "_exec_stream", side_effect=mock_exec):
-            result = await mgr._build_image("test-img")
+            result = await mgr._build_image("test-img", provider_versions)
 
         assert result is True
         assert built_content
         assert "Docker extras" not in built_content[0]
         assert built_content[0] == base_content
 
-    async def test_build_timeout_scales_with_extras(self, tmp_path: Path) -> None:
+    async def test_build_timeout_scales_with_extras(
+        self,
+        tmp_path: Path,
+        provider_versions: ProviderCliVersions,
+    ) -> None:
         from ductor_bot.infra.docker import DockerManager
 
         fw, paths = _make_docker_paths(tmp_path)
-        (fw / "Dockerfile.sandbox").write_text("FROM ubuntu\nUSER node\n")
+        (fw / "Dockerfile.sandbox").write_text(_BASE)
 
         config = DockerConfig(
             enabled=True,
@@ -483,6 +525,6 @@ class TestDockerManagerExtras:
             return 0, ""
 
         with patch.object(mgr, "_exec_stream", side_effect=mock_exec):
-            await mgr._build_image("test-img")
+            await mgr._build_image("test-img", provider_versions)
 
         assert captured_timeout == 300 + 180

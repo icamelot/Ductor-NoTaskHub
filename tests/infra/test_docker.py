@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from ductor_bot.config import DockerConfig
+from ductor_bot.infra.docker_image import ProviderCliVersions
 from ductor_bot.workspace.paths import DuctorPaths
 
 
@@ -26,6 +28,11 @@ def docker_paths(tmp_path: Path) -> DuctorPaths:
 @pytest.fixture
 def docker_config() -> DockerConfig:
     return DockerConfig(enabled=True, image_name="test-img", container_name="test-ctr")
+
+
+@pytest.fixture
+def provider_versions() -> ProviderCliVersions:
+    return ProviderCliVersions("2.1.215", "0.144.6", "0.51.0")
 
 
 class TestDockerManager:
@@ -97,7 +104,10 @@ class TestDockerManager:
         assert result == "test-ctr"
 
     async def test_setup_builds_image_when_auto_build(
-        self, docker_config: DockerConfig, docker_paths: DuctorPaths
+        self,
+        docker_config: DockerConfig,
+        docker_paths: DuctorPaths,
+        provider_versions: ProviderCliVersions,
     ) -> None:
         from ductor_bot.infra.docker import DockerManager
 
@@ -129,10 +139,42 @@ class TestDockerManager:
             patch("shutil.which", return_value="/usr/bin/docker"),
             patch.object(mgr, "_exec", side_effect=mock_exec),
             patch.object(mgr, "_exec_stream", side_effect=mock_exec),
+            patch(
+                "ductor_bot.infra.docker.resolve_provider_cli_versions",
+                return_value=provider_versions,
+            ),
         ):
             result = await mgr.setup()
         assert build_called
         assert result == "test-ctr"
+
+    async def test_build_image_passes_concrete_provider_build_args(
+        self,
+        docker_config: DockerConfig,
+        docker_paths: DuctorPaths,
+        provider_versions: ProviderCliVersions,
+    ) -> None:
+        from ductor_bot.infra.docker import DockerManager
+
+        (docker_paths.framework_root / "Dockerfile.sandbox").write_text(
+            "FROM node:22\n# -- Ductor configured extras insertion point --\n"
+        )
+        manager = DockerManager(docker_config, docker_paths)
+        calls: list[tuple[str, ...]] = []
+
+        async def run(*args: str, **_kwargs: object) -> tuple[int, str]:
+            calls.append(args)
+            return 0, ""
+
+        with patch.object(manager, "_exec_stream", side_effect=run):
+            assert await manager._build_image("candidate", provider_versions)
+
+        build = calls[0]
+        assert "--no-cache" not in build
+        assert "CLAUDE_CLI_VERSION=2.1.215" in build
+        assert "CODEX_CLI_VERSION=0.144.6" in build
+        assert "GEMINI_CLI_VERSION=0.51.0" in build
+        assert build[build.index("-t") + 1] == "candidate"
 
     async def test_setup_returns_none_when_auto_build_disabled(
         self, docker_config: DockerConfig, docker_paths: DuctorPaths
@@ -206,6 +248,28 @@ class TestDockerManager:
         mgr = DockerManager(docker_config, docker_paths)
         rc, _ = await mgr._exec("sleep", "10", deadline_seconds=0.1)
         assert rc != 0
+
+    async def test_exec_stream_discards_subprocess_output(
+        self,
+        docker_config: DockerConfig,
+        docker_paths: DuctorPaths,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        from ductor_bot.infra.docker import DockerManager
+
+        secret = "SENTINEL_SUBPROCESS_OUTPUT_DO_NOT_PRINT"
+        mgr = DockerManager(docker_config, docker_paths)
+        caplog.set_level("INFO")
+
+        rc, output = await mgr._exec_stream(
+            sys.executable,
+            "-c",
+            f"print({secret!r})",
+        )
+
+        assert rc == 0
+        assert output == ""
+        assert secret not in caplog.text
 
     async def test_mounts_full_ductor_home(
         self, docker_config: DockerConfig, docker_paths: DuctorPaths
