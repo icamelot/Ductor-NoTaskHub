@@ -33,8 +33,22 @@ RUN apt-get update \
 # Allow pip installs without the "externally managed" guard
 RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 
-# Install Claude Code CLI and Codex CLI
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+# -- Ductor configured extras insertion point --
+
+ARG CLAUDE_CLI_VERSION
+ARG CODEX_CLI_VERSION
+ARG GEMINI_CLI_VERSION
+
+USER root
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g \
+      "@anthropic-ai/claude-code@$CLAUDE_CLI_VERSION" \
+      "@openai/codex@$CODEX_CLI_VERSION" \
+      "@google/gemini-cli@$GEMINI_CLI_VERSION"
+
+LABEL org.ductor.claude-version="$CLAUDE_CLI_VERSION" \
+      org.ductor.codex-version="$CODEX_CLI_VERSION" \
+      org.ductor.gemini-version="$GEMINI_CLI_VERSION"
 
 # Prepare a writable data directory
 RUN mkdir -p /data && chown node:node /data
