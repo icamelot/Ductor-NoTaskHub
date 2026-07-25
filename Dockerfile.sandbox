@@ -50,7 +50,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install uv ruff
 
 RUN --mount=type=cache,target=/root/.npm \
-    npm install -g pnpm yarn
+    npm install -g pnpm \
+    && yarn --version
 
 # -- Ductor document tools --
 

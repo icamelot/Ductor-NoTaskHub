@@ -69,9 +69,18 @@ def test_development_layer_contains_exact_approved_tools_and_caches() -> None:
     assert "--mount=type=cache,target=/root/.cache/pip" in section
     assert "--mount=type=cache,target=/root/.npm" in section
     assert "python3 -m pip install uv ruff" in section
-    assert "npm install -g pnpm yarn" in section
+    assert "npm install -g pnpm" in section
     assert "ln -sf /usr/bin/batcat /usr/local/bin/bat" in section
     assert "ln -sf /usr/bin/fdfind /usr/local/bin/fd" in section
+
+
+def test_node_development_layer_preserves_base_yarn_command() -> None:
+    content = _dockerfile()
+    section = _section(content, _DEVELOPMENT_MARKER, _DOCUMENT_MARKER)
+
+    assert "FROM node:22-bookworm-slim" in content
+    assert "npm install -g pnpm yarn" not in section
+    assert "yarn --version" in section
 
 
 def test_document_layer_contains_approved_office_pdf_ocr_tools() -> None:
