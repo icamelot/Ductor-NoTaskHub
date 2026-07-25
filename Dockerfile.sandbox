@@ -52,6 +52,20 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.npm \
     npm install -g pnpm yarn
 
+# -- Ductor document tools --
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+       fonts-noto-cjk ghostscript imagemagick libimage-exiftool-perl \
+       libreoffice-calc libreoffice-impress libreoffice-writer \
+       poppler-utils qpdf tesseract-ocr tesseract-ocr-chi-sim \
+       tesseract-ocr-chi-tra tesseract-ocr-eng
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install python-docx openpyxl python-pptx pypdf
+
 # -- Ductor configured extras insertion point --
 
 ARG CLAUDE_CLI_VERSION

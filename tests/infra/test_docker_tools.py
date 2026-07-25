@@ -3,11 +3,15 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ductor_bot.infra.docker_extras import DOCKER_EXTRAS_MARKER
+from ductor_bot.infra.docker_extras import (
+    DOCKER_EXTRAS_BY_ID,
+    DOCKER_EXTRAS_MARKER,
+)
 
 _REPO_ROOT = Path(__file__).parents[2]
 _DOCKERFILE = _REPO_ROOT / "Dockerfile.sandbox"
 _DEVELOPMENT_MARKER = "# -- Ductor development tools --"
+_DOCUMENT_MARKER = "# -- Ductor document tools --"
 
 
 def _dockerfile() -> str:
@@ -67,3 +71,66 @@ def test_development_layer_contains_exact_approved_tools_and_caches() -> None:
     assert "npm install -g pnpm yarn" in section
     assert "ln -sf /usr/bin/batcat /usr/local/bin/bat" in section
     assert "ln -sf /usr/bin/fdfind /usr/local/bin/fd" in section
+
+
+def test_document_layer_contains_approved_office_pdf_ocr_tools() -> None:
+    content = _dockerfile()
+    section = _section(content, _DOCUMENT_MARKER, DOCKER_EXTRAS_MARKER)
+    apt_packages = {
+        "libreoffice-writer",
+        "libreoffice-calc",
+        "libreoffice-impress",
+        "poppler-utils",
+        "qpdf",
+        "ghostscript",
+        "imagemagick",
+        "libimage-exiftool-perl",
+        "fonts-noto-cjk",
+        "tesseract-ocr",
+        "tesseract-ocr-eng",
+        "tesseract-ocr-chi-sim",
+        "tesseract-ocr-chi-tra",
+    }
+
+    for package in apt_packages:
+        assert re.search(
+            rf"(?<![A-Za-z0-9_.+-]){re.escape(package)}(?![A-Za-z0-9_.+-])",
+            section,
+        )
+
+    assert "--mount=type=cache,target=/var/cache/apt,sharing=locked" in section
+    assert "--mount=type=cache,target=/var/lib/apt,sharing=locked" in section
+    assert "--mount=type=cache,target=/root/.cache/pip" in section
+    assert "python3 -m pip install python-docx openpyxl python-pptx pypdf" in section
+    assert "fonts-liberation" in content
+    assert "fonts-noto-color-emoji" in content
+
+
+def test_document_and_provider_layers_keep_cache_order() -> None:
+    content = _dockerfile()
+
+    assert content.index(_DEVELOPMENT_MARKER) < content.index(_DOCUMENT_MARKER)
+    assert content.index(_DOCUMENT_MARKER) < content.index(DOCKER_EXTRAS_MARKER)
+    assert content.index(DOCKER_EXTRAS_MARKER) < content.index(
+        "ARG CLAUDE_CLI_VERSION"
+    )
+
+
+def test_playwright_extra_stays_python_only() -> None:
+    playwright = DOCKER_EXTRAS_BY_ID["playwright"]
+
+    assert playwright.pip_packages == ["playwright"]
+    assert playwright.apt_packages == []
+
+
+def test_dockerfile_has_no_browser_installation_or_profile_instructions() -> None:
+    content = _dockerfile()
+    instructions = "\n".join(
+        line for line in content.splitlines() if not line.lstrip().startswith("#")
+    ).lower()
+
+    assert re.search(r"\b(chromium|chromium-browser|google-chrome)\b", instructions) is None
+    assert "playwright install" not in instructions
+    assert "/ms-playwright" not in instructions
+    assert ".cache/ms-playwright" not in instructions
+    assert ".config/chrom" not in instructions
