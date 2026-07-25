@@ -84,3 +84,115 @@ def test_sandbox_dockerfile_installs_exact_provider_build_arguments() -> None:
     assert '"@openai/codex@$CODEX_CLI_VERSION"' in dockerfile
     assert '"@google/gemini-cli@$GEMINI_CLI_VERSION"' in dockerfile
     assert 'org.ductor.codex-version="$CODEX_CLI_VERSION"' in dockerfile
+
+
+def test_candidate_image_ref_keeps_repository_and_uses_unique_token() -> None:
+    from ductor_bot.infra.docker_image import candidate_image_ref
+
+    assert (
+        candidate_image_ref(
+            "registry.example:5000/team/ductor-sandbox:stable",
+            token_factory=lambda: "abc123",
+        )
+        == "registry.example:5000/team/ductor-sandbox:ductor-candidate-abc123"
+    )
+
+
+def test_inspect_image_id_returns_canonical_immutable_id() -> None:
+    from ductor_bot.infra.docker_image import inspect_image_id
+
+    image_id = f"sha256:{'a' * 64}"
+
+    def runner(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, stdout=f"{image_id}\n", stderr="")
+
+    assert inspect_image_id("candidate", runner=runner) == image_id
+
+
+def test_verify_image_codex_version_requires_exact_expected_version() -> None:
+    from ductor_bot.infra.docker_image import verify_image_codex_version
+
+    calls: list[list[str]] = []
+
+    def runner(
+        args: list[str], _timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args, 0, stdout="codex-cli 0.144.6\n", stderr=""
+        )
+
+    verify_image_codex_version("candidate", "0.144.6", runner=runner)
+
+    assert calls == [
+        ["docker", "run", "--rm", "--entrypoint", "codex", "candidate", "--version"]
+    ]
+
+
+def test_verify_image_codex_version_rejects_mismatch_without_raw_output() -> None:
+    from ductor_bot.infra.docker_image import verify_image_codex_version
+
+    secret = "SENTINEL_SECRET"
+
+    def runner(
+        args: list[str], _timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=f"codex-cli 0.142.5 {secret}",
+            stderr=secret,
+        )
+
+    with pytest.raises(
+        RuntimeError, match="candidate Codex version mismatch"
+    ) as exc_info:
+        verify_image_codex_version("candidate", "0.144.6", runner=runner)
+
+    assert secret not in str(exc_info.value)
+
+
+def test_verify_container_codex_version_uses_exact_container_command() -> None:
+    from ductor_bot.infra.docker_image import verify_container_codex_version
+
+    calls: list[list[str]] = []
+
+    def runner(
+        args: list[str], _timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args, 0, stdout="codex-cli 0.144.6\n", stderr=""
+        )
+
+    verify_container_codex_version("ductor-sandbox", "0.144.6", runner=runner)
+
+    assert calls == [["docker", "exec", "ductor-sandbox", "codex", "--version"]]
+
+
+def test_tag_image_uses_exec_arguments() -> None:
+    from ductor_bot.infra.docker_image import tag_image
+
+    calls: list[list[str]] = []
+
+    def runner(args: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    tag_image(f"sha256:{'a' * 64}", "ductor-sandbox", runner=runner)
+
+    assert calls == [["docker", "tag", f"sha256:{'a' * 64}", "ductor-sandbox"]]
+
+
+def test_remove_image_tag_sanitizes_failure() -> None:
+    from ductor_bot.infra.docker_image import remove_image_tag
+
+    secret = "SENTINEL_SECRET"
+
+    def runner(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 17, stdout=secret, stderr=secret)
+
+    with pytest.raises(RuntimeError, match="exit code 17") as exc_info:
+        remove_image_tag("candidate", runner=runner)
+
+    assert secret not in str(exc_info.value)
