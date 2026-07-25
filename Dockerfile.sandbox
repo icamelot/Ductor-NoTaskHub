@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # Dockerfile.sandbox -- lightweight sandbox for ductor CLI execution.
 # Based on Node 22 (Debian bookworm) with Python 3, Claude Code CLI,
 # and Codex CLI pre-installed.  The container runs "sleep infinity" so
@@ -33,8 +35,54 @@ RUN apt-get update \
 # Allow pip installs without the "externally managed" guard
 RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
 
-# Install Claude Code CLI and Codex CLI
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+# -- Ductor development tools --
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+       bat fd-find file gh git-lfs jq less p7zip-full pipx ripgrep rsync \
+       shellcheck shfmt sqlite3 tree unzip vim wget \
+    && ln -sf /usr/bin/batcat /usr/local/bin/bat \
+    && ln -sf /usr/bin/fdfind /usr/local/bin/fd
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install uv ruff
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g pnpm \
+    && yarn --version
+
+# -- Ductor document tools --
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+       fonts-noto-cjk ghostscript imagemagick libimage-exiftool-perl \
+       libreoffice-calc libreoffice-impress libreoffice-writer \
+       poppler-utils qpdf tesseract-ocr tesseract-ocr-chi-sim \
+       tesseract-ocr-chi-tra tesseract-ocr-eng
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install python-docx openpyxl python-pptx pypdf
+
+# -- Ductor configured extras insertion point --
+
+ARG CLAUDE_CLI_VERSION
+ARG CODEX_CLI_VERSION
+ARG GEMINI_CLI_VERSION
+
+USER root
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g \
+      "@anthropic-ai/claude-code@$CLAUDE_CLI_VERSION" \
+      "@openai/codex@$CODEX_CLI_VERSION" \
+      "@google/gemini-cli@$GEMINI_CLI_VERSION"
+
+LABEL org.ductor.claude-version="$CLAUDE_CLI_VERSION" \
+      org.ductor.codex-version="$CODEX_CLI_VERSION" \
+      org.ductor.gemini-version="$GEMINI_CLI_VERSION"
 
 # Prepare a writable data directory
 RUN mkdir -p /data && chown node:node /data

@@ -14,6 +14,10 @@ from shutil import which
 from typing import TYPE_CHECKING, ClassVar
 
 from ductor_bot.config import DockerConfig
+from ductor_bot.infra.docker_image import (
+    ProviderCliVersions,
+    resolve_provider_cli_versions,
+)
 from ductor_bot.workspace.paths import DuctorPaths
 
 if TYPE_CHECKING:
@@ -201,7 +205,7 @@ class DockerManager:
                 f"  Installing Claude, Codex, and Gemini CLIs{extras_msg}\n"
                 "  This may take a few minutes on first run...[/dim]"
             )
-            if not await self._build_image(image):
+            if not await self._auto_build_image(image):
                 self._status("[bold red]Docker image build failed.[/bold red]")
                 logger.warning("Docker image build failed, falling back to host execution")
                 return None
@@ -263,7 +267,11 @@ class DockerManager:
         rc, _ = await self._exec("docker", "image", "inspect", image)
         return rc == 0
 
-    async def _build_image(self, image: str) -> bool:
+    async def _build_image(
+        self,
+        image: str,
+        versions: ProviderCliVersions,
+    ) -> bool:
         dockerfile = self._paths.dockerfile_sandbox_path
         if not dockerfile.exists():
             logger.error("Dockerfile.sandbox not found at %s", dockerfile)
@@ -289,19 +297,22 @@ class DockerManager:
         with tempfile.TemporaryDirectory() as ctx:
             ctx_dockerfile = Path(ctx) / "Dockerfile"
             ctx_dockerfile.write_text(dockerfile_content, encoding="utf-8")
-            rc, output = await self._exec_stream(
-                "docker",
-                "build",
-                "-t",
-                image,
-                "-f",
-                str(ctx_dockerfile),
-                ctx,
-                deadline_seconds=timeout,
-            )
+            build_cmd = ["docker", "build"]
+            for name, value in versions.build_args():
+                build_cmd += ["--build-arg", f"{name}={value}"]
+            build_cmd += ["-t", image, "-f", str(ctx_dockerfile), ctx]
+            rc, _ = await self._exec_stream(*build_cmd, deadline_seconds=timeout)
         if rc != 0:
-            logger.error("Docker build failed:\n%s", output[-2000:])
+            logger.error("Docker image build failed (exit code %d)", rc)
         return rc == 0
+
+    async def _auto_build_image(self, image: str) -> bool:
+        try:
+            versions = resolve_provider_cli_versions()
+        except RuntimeError:
+            logger.warning("Provider CLI version resolution failed")
+            return False
+        return await self._build_image(image, versions)
 
     async def _container_running(self, name: str) -> bool:
         rc, output = await self._exec(
@@ -425,13 +436,8 @@ class DockerManager:
         *args: str,
         deadline_seconds: float = 30,
     ) -> tuple[int, str]:
-        """Run a Docker command, streaming output to the console.
-
-        Returns ``(returncode, full_output)`` just like ``_exec``, but prints
-        each line to stderr in real-time so the user can follow progress.
-        """
+        """Run a Docker command while discarding subprocess diagnostics."""
         proc: asyncio.subprocess.Process | None = None
-        collected: list[str] = []
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -440,27 +446,18 @@ class DockerManager:
             )
             assert proc.stdout is not None
             async with asyncio.timeout(deadline_seconds):
-                async for raw_line in proc.stdout:
-                    line = raw_line.decode(errors="replace").rstrip()
-                    collected.append(line)
-                    if self._console:
-                        self._console.print(f"  [dim]{line}[/dim]")
-                    else:
-                        logger.info("docker build: %s", line)
+                async for _raw_line in proc.stdout:
+                    pass
                 await proc.wait()
-            return proc.returncode or 0, "\n".join(collected)
         except TimeoutError:
             if proc is not None:
                 proc.kill()
                 await proc.wait()
-            msg = f"Timed out after {deadline_seconds}s"
-            if self._console:
-                self._console.print(f"  [bold red]{msg}[/bold red]")
-            logger.debug("Docker command timed out: %s", args[:3])
-            return 1, "\n".join(collected) + f"\n{msg}"
-        except OSError as exc:
-            logger.debug("Docker command failed: %s -> %s", args[:3], exc)
-            return 1, str(exc)
+            return 1, ""
+        except OSError:
+            return 1, ""
+        else:
+            return proc.returncode or 0, ""
 
     @staticmethod
     async def _exec(

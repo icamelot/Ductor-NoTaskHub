@@ -80,7 +80,7 @@ restart_hint = "[dim]Restart the bot to apply.[/dim]"
 stopping = "[dim]Stopping bot...[/dim]"
 removing_container = "[dim]Removing container '{name}'...[/dim]"
 removing_image = "[dim]Removing image '{name}'...[/dim]"
-done = "[green]Done.[/green] Image will be rebuilt on next bot start.\n[dim]If running as a service, it will restart automatically.[/dim]"
+done = "[green]Verified Docker image deployed.[/green]"
 
 [docker.mount]
 usage = "[bold red]Usage: ductor docker mount <path>[/bold red]"
