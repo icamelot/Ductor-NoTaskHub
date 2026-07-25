@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 from ductor_bot.infra.docker_extras import (
@@ -10,6 +12,7 @@ from ductor_bot.infra.docker_extras import (
 
 _REPO_ROOT = Path(__file__).parents[2]
 _DOCKERFILE = _REPO_ROOT / "Dockerfile.sandbox"
+_INSTALL_SCRIPT = _REPO_ROOT / "scripts" / "install-docker-tools.sh"
 _DEVELOPMENT_MARKER = "# -- Ductor development tools --"
 _DOCUMENT_MARKER = "# -- Ductor document tools --"
 
@@ -134,3 +137,35 @@ def test_dockerfile_has_no_browser_installation_or_profile_instructions() -> Non
     assert "/ms-playwright" not in instructions
     assert ".cache/ms-playwright" not in instructions
     assert ".config/chrom" not in instructions
+
+
+def test_manual_install_script_has_safe_install_then_rebuild_contract() -> None:
+    script = _INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert script.startswith("#!/usr/bin/env bash\n")
+    assert "set -euo pipefail" in script
+    assert "command -v uv >/dev/null 2>&1" in script
+    assert "command -v docker >/dev/null 2>&1" in script
+    install = 'uv tool install --force --from "$repo_root" ductor'
+    rebuild = "exec ductor docker rebuild"
+    assert install in script
+    assert rebuild in script
+    assert script.index(install) < script.index(rebuild)
+    assert "up to 40 minutes" in script
+    assert "docker tag" not in script
+    assert "docker rm" not in script
+    assert "docker rmi" not in script
+    assert "docker inspect" not in script
+
+
+def test_manual_install_script_is_executable_and_valid_bash() -> None:
+    assert os.access(_INSTALL_SCRIPT, os.X_OK)
+
+    result = subprocess.run(
+        ["bash", "-n", str(_INSTALL_SCRIPT)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0
