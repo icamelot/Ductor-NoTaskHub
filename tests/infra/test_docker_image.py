@@ -61,9 +61,7 @@ def test_resolve_provider_cli_versions_sanitizes_npm_failure() -> None:
     def runner(args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args, 23, stdout=secret, stderr=secret)
 
-    with pytest.raises(
-        RuntimeError, match=r"npm command failed.*exit code 23"
-    ) as exc_info:
+    with pytest.raises(RuntimeError, match=r"npm command failed.*exit code 23") as exc_info:
         resolve_provider_cli_versions(runner=runner)
 
     assert secret not in str(exc_info.value)
@@ -72,9 +70,7 @@ def test_resolve_provider_cli_versions_sanitizes_npm_failure() -> None:
 def test_sandbox_dockerfile_installs_exact_provider_build_arguments() -> None:
     dockerfile = (_REPO_ROOT / "Dockerfile.sandbox").read_text()
 
-    marker_position = dockerfile.index(
-        "# -- Ductor configured extras insertion point --"
-    )
+    marker_position = dockerfile.index("# -- Ductor configured extras insertion point --")
     provider_position = dockerfile.index("ARG CLAUDE_CLI_VERSION")
 
     assert marker_position < provider_position
@@ -114,19 +110,13 @@ def test_verify_image_codex_version_requires_exact_expected_version() -> None:
 
     calls: list[list[str]] = []
 
-    def runner(
-        args: list[str], _timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def runner(args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
         calls.append(args)
-        return subprocess.CompletedProcess(
-            args, 0, stdout="codex-cli 0.144.6\n", stderr=""
-        )
+        return subprocess.CompletedProcess(args, 0, stdout="codex-cli 0.144.6\n", stderr="")
 
     verify_image_codex_version("candidate", "0.144.6", runner=runner)
 
-    assert calls == [
-        ["docker", "run", "--rm", "--entrypoint", "codex", "candidate", "--version"]
-    ]
+    assert calls == [["docker", "run", "--rm", "--entrypoint", "codex", "candidate", "--version"]]
 
 
 def test_verify_image_codex_version_rejects_mismatch_without_raw_output() -> None:
@@ -134,9 +124,7 @@ def test_verify_image_codex_version_rejects_mismatch_without_raw_output() -> Non
 
     secret = "SENTINEL_SECRET"
 
-    def runner(
-        args: list[str], _timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def runner(args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args,
             0,
@@ -144,9 +132,7 @@ def test_verify_image_codex_version_rejects_mismatch_without_raw_output() -> Non
             stderr=secret,
         )
 
-    with pytest.raises(
-        RuntimeError, match="candidate Codex version mismatch"
-    ) as exc_info:
+    with pytest.raises(RuntimeError, match="candidate Codex version mismatch") as exc_info:
         verify_image_codex_version("candidate", "0.144.6", runner=runner)
 
     assert secret not in str(exc_info.value)
@@ -157,13 +143,9 @@ def test_verify_container_codex_version_uses_exact_container_command() -> None:
 
     calls: list[list[str]] = []
 
-    def runner(
-        args: list[str], _timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def runner(args: list[str], _timeout: float) -> subprocess.CompletedProcess[str]:
         calls.append(args)
-        return subprocess.CompletedProcess(
-            args, 0, stdout="codex-cli 0.144.6\n", stderr=""
-        )
+        return subprocess.CompletedProcess(args, 0, stdout="codex-cli 0.144.6\n", stderr="")
 
     verify_container_codex_version("ductor-sandbox", "0.144.6", runner=runner)
 

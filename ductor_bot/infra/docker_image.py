@@ -58,8 +58,7 @@ def _npm_version(package: str, runner: CommandRunner) -> str:
     result = runner(["npm", "view", package, "version", "--json"])
     if result.returncode != 0:
         raise RuntimeError(
-            f"Unable to resolve {package}: npm command failed "
-            f"(exit code {result.returncode})"
+            f"Unable to resolve {package}: npm command failed (exit code {result.returncode})"
         )
     try:
         value = json.loads(result.stdout)
@@ -113,9 +112,7 @@ def inspect_image_id(
 
 
 def _contains_exact_version(output: str, expected: str) -> bool:
-    pattern = re.compile(
-        rf"(^|[^0-9A-Za-z.+-]){re.escape(expected)}([^0-9A-Za-z.+-]|$)"
-    )
+    pattern = re.compile(rf"(^|[^0-9A-Za-z.+-]){re.escape(expected)}([^0-9A-Za-z.+-]|$)")
     return pattern.search(output) is not None
 
 
@@ -146,8 +143,7 @@ def verify_image_codex_version(
         raise RuntimeError("Docker candidate Codex version check timed out") from None
     if result.returncode != 0:
         raise RuntimeError(
-            "Docker candidate Codex version check failed "
-            f"(exit code {result.returncode})"
+            f"Docker candidate Codex version check failed (exit code {result.returncode})"
         )
     if not _contains_exact_version(result.stdout, expected):
         raise RuntimeError("Docker candidate Codex version mismatch")
@@ -187,9 +183,7 @@ def remove_image_tag(
 ) -> None:
     result = runner(["docker", "rmi", image])
     if result.returncode != 0:
-        raise RuntimeError(
-            f"Docker image tag removal failed (exit code {result.returncode})"
-        )
+        raise RuntimeError(f"Docker image tag removal failed (exit code {result.returncode})")
 
 
 def _canonical_image_id(value: str, *, context: str) -> str:
@@ -206,9 +200,7 @@ def list_direct_image_containers(
     expected = _canonical_image_id(image_id, context="Unable to list image containers")
     listed = runner(["docker", "ps", "-aq"])
     if listed.returncode != 0:
-        raise RuntimeError(
-            f"Unable to list Docker containers (exit code {listed.returncode})"
-        )
+        raise RuntimeError(f"Unable to list Docker containers (exit code {listed.returncode})")
     ids = listed.stdout.split()
     if not ids:
         return []
@@ -247,9 +239,7 @@ def remove_containers(
     for container in containers:
         result = runner(["docker", "rm", "-f", container.id])
         if result.returncode != 0:
-            raise RuntimeError(
-                f"Unable to remove Docker container (exit code {result.returncode})"
-            )
+            raise RuntimeError(f"Unable to remove Docker container (exit code {result.returncode})")
 
 
 def inspect_container_state(
@@ -293,9 +283,7 @@ def wait_for_container_images(
     while time.monotonic() < deadline:
         states = [inspect_container_state(name, runner=runner) for name in names]
         if all(
-            state is not None
-            and state.running
-            and state.image_id == expected_image_id
+            state is not None and state.running and state.image_id == expected_image_id
             for state in states
         ):
             return

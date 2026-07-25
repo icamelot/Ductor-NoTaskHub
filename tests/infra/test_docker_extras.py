@@ -173,9 +173,7 @@ class TestGenerateDockerfile:
         assert result.rstrip().endswith("USER node")
 
     def test_extras_are_inserted_before_provider_layer(self) -> None:
-        result = generate_dockerfile_extras(
-            _BASE, resolve_extras(["playwright", "ffmpeg"])
-        )
+        result = generate_dockerfile_extras(_BASE, resolve_extras(["playwright", "ffmpeg"]))
 
         assert result.index("pip install --no-cache-dir playwright") < result.index(
             "ARG CODEX_CLI_VERSION"
