@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # Dockerfile.sandbox -- lightweight sandbox for ductor CLI execution.
 # Based on Node 22 (Debian bookworm) with Python 3, Claude Code CLI,
 # and Codex CLI pre-installed.  The container runs "sleep infinity" so
@@ -32,6 +34,23 @@ RUN apt-get update \
 
 # Allow pip installs without the "externally managed" guard
 RUN rm -f /usr/lib/python*/EXTERNALLY-MANAGED
+
+# -- Ductor development tools --
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+       bat fd-find file gh git-lfs jq less p7zip-full pipx ripgrep rsync \
+       shellcheck shfmt sqlite3 tree unzip vim wget \
+    && ln -sf /usr/bin/batcat /usr/local/bin/bat \
+    && ln -sf /usr/bin/fdfind /usr/local/bin/fd
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install uv ruff
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g pnpm yarn
 
 # -- Ductor configured extras insertion point --
 
