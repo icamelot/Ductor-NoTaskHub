@@ -185,6 +185,28 @@ def test_docker_config_fields() -> None:
     assert d.image_name == "custom"
 
 
+def test_docker_config_command_defaults_to_independent_empty_lists() -> None:
+    first = DockerConfig()
+    second = DockerConfig()
+
+    first.command.append("changed")
+
+    assert first.command == ["changed"]
+    assert second.command == []
+
+
+def test_docker_config_preserves_command_argument_boundaries() -> None:
+    command = [
+        "/bin/bash",
+        "-lc",
+        "bash /ductor/workspace/daemons/start.sh && exec sleep infinity",
+    ]
+
+    config = DockerConfig(command=command)
+
+    assert config.command == command
+
+
 # -- AgentConfig transports normalization --
 
 

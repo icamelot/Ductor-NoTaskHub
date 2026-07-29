@@ -43,6 +43,7 @@ class DockerConfig(BaseModel):
     enabled: bool = False
     image_name: str = "ductor-sandbox"
     container_name: str = "ductor-sandbox"
+    command: list[str] = Field(default_factory=list)
     auto_build: bool = True
     mount_host_cache: bool = False
     mounts: list[str] = Field(default_factory=list)
