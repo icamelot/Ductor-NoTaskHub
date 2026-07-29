@@ -2,7 +2,7 @@
 
 Date: 2026-07-25
 
-Status: Design approved; written specification pending review
+Status: Approved
 
 Branch: `chore/sync-upstream-2026-07-25`
 
