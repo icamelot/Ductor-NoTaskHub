@@ -342,6 +342,7 @@ class DockerManager:
             "docker",
             "run",
             "-d",
+            "--init",
             "--name",
             name,
             "-w",

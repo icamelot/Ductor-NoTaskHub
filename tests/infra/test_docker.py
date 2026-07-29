@@ -38,6 +38,31 @@ def provider_versions() -> ProviderCliVersions:
 class TestDockerManager:
     """Test simplified Docker manager."""
 
+    async def test_start_container_enables_docker_init(
+        self,
+        docker_config: DockerConfig,
+        docker_paths: DuctorPaths,
+    ) -> None:
+        from ductor_bot.infra.docker import DockerManager
+
+        manager = DockerManager(docker_config, docker_paths)
+        run_args: tuple[str, ...] = ()
+
+        async def capture(*args: str, **_kwargs: object) -> tuple[int, str]:
+            nonlocal run_args
+            run_args = args
+            return 0, "container-id"
+
+        with (
+            patch.object(manager, "_exec", side_effect=capture),
+            patch("ductor_bot.infra.docker._needs_uid_mapping", return_value=False),
+        ):
+            started = await manager._start_container("test-ctr", "test-img")
+
+        assert started is True
+        assert run_args[:5] == ("docker", "run", "-d", "--init", "--name")
+        assert run_args[-1] == "test-img"
+
     def test_env_secret_flags_inject_dotenv_when_host_has_same_key(
         self,
         docker_config: DockerConfig,
