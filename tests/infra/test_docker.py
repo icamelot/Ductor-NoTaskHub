@@ -38,6 +38,23 @@ def provider_versions() -> ProviderCliVersions:
 class TestDockerManager:
     """Test simplified Docker manager."""
 
+    def test_env_secret_flags_inject_dotenv_when_host_has_same_key(
+        self,
+        docker_config: DockerConfig,
+        docker_paths: DuctorPaths,
+    ) -> None:
+        from ductor_bot.infra.docker import DockerManager
+        from ductor_bot.infra.env_secrets import clear_cache
+
+        docker_paths.env_file.write_text("SAME_KEY=from-dotenv\n")
+        clear_cache()
+        manager = DockerManager(docker_config, docker_paths)
+
+        with patch.dict("os.environ", {"SAME_KEY": "from-host"}, clear=False):
+            flags = manager._env_secret_flags()
+
+        assert flags == ["-e", "SAME_KEY=from-dotenv"]
+
     async def test_setup_returns_none_when_docker_not_found(
         self, docker_config: DockerConfig, docker_paths: DuctorPaths
     ) -> None:
