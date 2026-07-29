@@ -408,7 +408,7 @@ class DockerManager:
         # User secrets from the agent's .env.
         cmd += self._env_secret_flags()
 
-        cmd.append(image)
+        cmd += [image, *self._config.command]
 
         logger.info("Starting Docker container '%s' from image '%s'", name, image)
         logger.debug("docker run cmd: %s", " ".join(redact_cmd_for_log(cmd)))

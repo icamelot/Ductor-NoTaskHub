@@ -63,6 +63,41 @@ class TestDockerManager:
         assert run_args[:5] == ("docker", "run", "-d", "--init", "--name")
         assert run_args[-1] == "test-img"
 
+    async def test_start_container_appends_configured_command_after_image(
+        self,
+        docker_paths: DuctorPaths,
+    ) -> None:
+        from ductor_bot.infra.docker import DockerManager
+
+        command = [
+            "/bin/bash",
+            "-lc",
+            "bash /ductor/workspace/daemons/start.sh && exec sleep infinity",
+        ]
+        config = DockerConfig(
+            enabled=True,
+            image_name="test-img",
+            container_name="test-ctr",
+            command=command,
+        )
+        manager = DockerManager(config, docker_paths)
+        run_args: tuple[str, ...] = ()
+
+        async def capture(*args: str, **_kwargs: object) -> tuple[int, str]:
+            nonlocal run_args
+            run_args = args
+            return 0, "container-id"
+
+        with (
+            patch.object(manager, "_exec", side_effect=capture),
+            patch("ductor_bot.infra.docker._needs_uid_mapping", return_value=False),
+        ):
+            started = await manager._start_container("test-ctr", "test-img")
+
+        assert started is True
+        image_index = run_args.index("test-img")
+        assert list(run_args[image_index + 1 :]) == command
+
     def test_env_secret_flags_inject_dotenv_when_host_has_same_key(
         self,
         docker_config: DockerConfig,
