@@ -107,6 +107,7 @@ header = "**Status**"
 no_session = "Geen actieve sessie."
 model_line = "Model: {model}"
 model_line_configured = "Model: {model} (geconfigureerd: {configured})"
+effort_line = "Inzet: {effort}"
 topic_line = "Onderwerp: {topic}"
 session_line = "Sessie: `{sid}`"
 messages_line = "Berichten: {count}"
@@ -218,7 +219,7 @@ model_line = "Model: {model}"
 model_change = "Model: {old} -> {new}"
 provider_change = "Provider: {old} -> {new}"
 reasoning_line = "Reasoning: {effort}"
-effort_updated = "Reasoning-niveau bijgewerkt."
+effort_updated = "Reasoning-niveau ingesteld op {effort}."
 already_running = "Draait al op {model}. Geen wijzigingen."
 
 resume_hint = """\
@@ -235,6 +236,7 @@ select_claude = "Selecteer Claude-model:"
 select_gemini = "Selecteer Gemini-model:"
 select_codex = "Selecteer Codex-model:"
 select_antigravity = "Selecteer Antigravity-model:"
+select_grok = "Selecteer Grok Build-model:"
 no_codex = "Geen Codex-modellen beschikbaar."
 no_gemini = "Geen Gemini-modellen gevonden uit lokale Gemini CLI-bestanden."
 thinking_level = "Denkniveau voor {model}:"
@@ -306,6 +308,7 @@ header = "**ductor.dev**"
 version = "Versie: `{version}`"
 telegram_description = "AI-coding-agents (Claude, Codex, Gemini) op Telegram.\nBenoemde sessies, persistent geheugen, cronjobs, webhooks, live streaming."
 matrix_description = "AI-coding-agents (Claude, Codex, Gemini) op Matrix.\nBenoemde sessies, persistent geheugen, cronjobs, webhooks, live streaming."
+slack_description = "AI-coding-agents (Claude, Codex, Gemini) op Slack.\nBenoemde sessies, persistent geheugen, cronjobs, webhooks, live streaming."
 
 # -- Help (categorieën) -----------------------------------------------------------
 
@@ -318,6 +321,7 @@ cat_browse = "Bestanden & Info"
 cat_maintenance = "Onderhoud"
 footer = "Stuur een bericht om met je agent aan de slag te gaan."
 matrix_footer = "Gebruik `!` of `/` als prefix. Stuur een bericht om te beginnen."
+slack_footer = "Gebruik opdrachten zoals `help` of `/help`. Stuur een ander bericht om te beginnen."
 
 # -- Multi-agent -------------------------------------------------------------------
 
@@ -407,10 +411,13 @@ default_provider = "`/session <prompt>` — standaard provider"
 claude_single = "`/session <prompt>` — draait op Claude"
 claude_model = "`/session @opus <prompt>` — specifiek model"
 codex_single = "`/session <prompt>` — draait op Codex"
+grok_single = "`/session <prompt>` — draait op Grok Build"
 gemini_single = "`/session <prompt>` — draait op Gemini"
 gemini_model = "`/session @flash <prompt>` — specifiek model"
+grok_model = "`/session @grok-4.5 <prompt>` — specifiek model"
 claude_multi = "`/session @opus <prompt>` — Claude (opus)"
 codex_multi = "`/session @codex <prompt>` — Codex"
+grok_multi = "`/session @grok <prompt>` — Grok Build"
 gemini_multi = "`/session @flash <prompt>` — Gemini (flash)"
 explicit = "`/session @provider model <prompt>` — expliciet"
 
@@ -450,3 +457,7 @@ changelog_header = "**Changelog v{version}**"
 
 [multiagent]
 async_task_received = "📥 **Async taak ontvangen** van `{sender}`\nSessie: `{session}` · Taak-ID: `{task_id}`\n\n_{preview}_"
+
+[effort]
+select = "Kies de redeneerinzet voor {model}:"
+unsupported = "Redeneerinzet is niet instelbaar voor provider `{provider}`."

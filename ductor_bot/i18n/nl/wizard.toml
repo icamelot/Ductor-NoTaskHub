@@ -11,6 +11,7 @@ claude = "  Claude Code CLI   {status}"
 codex = "  OpenAI Codex CLI  {status}"
 gemini = "  Google Gemini CLI {status}"
 antigravity = "  Antigravity CLI   {status}"
+grok = "  xAI Grok CLI      {status}"
 no_auth = """\
 \n[bold red]Minstens één CLI moet geïnstalleerd en geauthenticeerd zijn.[/bold red]\n
   Claude: [dim]https://docs.anthropic.com/en/docs/claude-code[/dim]
@@ -20,6 +21,7 @@ claude_check_failed = "[yellow]Claude auth check raised: {error}. Skipping.[/yel
 codex_check_failed = "[yellow]Codex auth check raised: {error}. Skipping.[/yellow]"
 gemini_check_failed = "[yellow]Gemini auth check raised: {error}. Skipping.[/yellow]"
 antigravity_check_failed = "[yellow]Antigravity auth check raised: {error}. Skipping.[/yellow]"
+grok_check_failed = "[yellow]Grok auth check raised: {error}. Skipping.[/yellow]"
 
 [disclaimer]
 title = "[bold yellow]Disclaimer[/bold yellow]"
@@ -41,7 +43,8 @@ title = "[bold]Berichtentransport[/bold]"
 body = """\
 [bold]Kies hoe gebruikers met de bot communiceren:[/bold]\n
   [bold cyan]Telegram[/bold cyan]  — Vereist een bot-token van @BotFather
-  [bold cyan]Matrix[/bold cyan]    — Vereist een Matrix-account op een homeserver (bijv. Element)"""
+  [bold cyan]Matrix[/bold cyan]    — Vereist een Matrix-account op een homeserver (bijv. Element)
+  [bold cyan]Slack[/bold cyan]     — Vereist Slack bot-/app-tokens en de Slack-extra"""
 prompt = "Selecteer transport:"
 
 [telegram.token]
@@ -104,6 +107,44 @@ body = """\
 [dim]Formaat: @gebruikersnaam:homeserver.domein[/dim]"""
 prompt = "Je Matrix user ID:"
 error = "[red]Ongeldig formaat. Verwacht: @user:domein (bijv. @nik:matrix.org)[/red]"
+
+[slack.bot_token]
+title = "[bold]Slack Bot Token[/bold]"
+body = """\
+[bold]Voer je Slack bot-token in.[/bold]\n
+  Kopieer de [bold cyan]Bot User OAuth Token[/bold cyan] uit je Slack-app.\n
+[dim]Formaat: xoxb-...[/dim]"""
+prompt = "Bot-token:"
+error = "[red]Ongeldig bot-token. Verwacht een token dat begint met xoxb-[/red]"
+
+[slack.app_token]
+title = "[bold]Slack App Token[/bold]"
+body = """\
+[bold]Voer je Slack app-level token in.[/bold]\n
+  Schakel Socket Mode in voor je Slack-app en maak een app-token aan met
+  de scope [bold cyan]connections:write[/bold cyan].\n
+[dim]Formaat: xapp-...[/dim]"""
+prompt = "App-token:"
+error = "[red]Ongeldig app-token. Verwacht een token dat begint met xapp-[/red]"
+
+[slack.allowed_channels]
+title = "[bold]Toegestane kanalen[/bold]"
+body = """\
+[bold]Van welke Slack-kanalen mag de bot berichten accepteren?[/bold]\n
+  Voer een of meer kanaal-IDs in, gescheiden door komma's of spaties.\n
+  Laat leeg om elk kanaal toe te staan waarin de bot wordt uitgenodigd.\n
+[dim]Voorbeelden: C0123456789, G0123456789[/dim]"""
+prompt = "Toegestane kanaal-IDs (optioneel):"
+error = "[red]Ongeldige Slack kanaal-ID. Gebruik C...- of G...-IDs, gescheiden door komma's/spaties.[/red]"
+
+[slack.allowed_users]
+title = "[bold]Toegestane gebruikers[/bold]"
+body = """\
+[bold]Welke Slack-gebruikers mogen met de bot praten?[/bold]\n
+  Voer een of meer Slack user IDs in, gescheiden door komma's of spaties.\n
+[dim]Voorbeeld: U0123456789[/dim]"""
+prompt = "Toegestane user IDs:"
+error = "[red]Ongeldige Slack user ID. Gebruik een of meer U...-IDs, gescheiden door komma's/spaties.[/red]"
 
 [docker]
 title = "[bold]Docker Sandboxing[/bold]"

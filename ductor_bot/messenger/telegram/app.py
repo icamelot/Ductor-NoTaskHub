@@ -136,7 +136,7 @@ def _build_help_text() -> str:
         SEP,
         f"{t('help.cat_daily')}\n{_help_line('new')}\n{_help_line('reset')}\n{_help_line('stop')}\n"
         f"{_help_line('interrupt')}\n{_help_line('stop_all')}\n"
-        f"{_help_line('model')}\n{_help_line('status')}\n{_help_line('memory')}",
+        f"{_help_line('model')}\n{_help_line('effort')}\n{_help_line('status')}\n{_help_line('memory')}",
         f"{t('help.cat_automation')}\n{_help_line('session')}\n{_help_line('tasks')}\n{_help_line('cron')}",
         f"{t('help.cat_multiagent')}\n{_help_line('agent_commands')}",
         f"{t('help.cat_browse')}\n{_help_line('where')}\n{_help_line('leave')}\n"
@@ -167,7 +167,13 @@ class TelegramNotificationService:
 
     async def notify_all(self, text: str) -> None:
         for uid in self._config.allowed_user_ids:
-            await send_rich(self._bot, uid, text, None)
+            try:
+                await send_rich(self._bot, uid, text, None)
+            except TelegramAPIError:
+                # An unreachable recipient (e.g. never pressed /start -> "chat
+                # not found") must not abort the notification fan-out — or, at
+                # startup, the whole boot.
+                logger.warning("Notification to user %d failed, skipping", uid)
 
 
 class TelegramBot:
@@ -399,7 +405,7 @@ class TelegramBot:
         r.message(Command("tasks", ignore_case=True))(self._on_tasks)
         r.message(Command("showfiles", ignore_case=True))(self._on_showfiles)
         r.message(Command("agent_commands", ignore_case=True))(self._on_agent_commands)
-        base_cmds = ["status", "memory", "model", "cron", "diagnose", "upgrade", "reset"]
+        base_cmds = ["status", "memory", "model", "effort", "cron", "diagnose", "upgrade", "reset"]
         if self._agent_name == "main":
             base_cmds += ["agents", "agent_start", "agent_stop", "agent_restart"]
         for cmd in base_cmds:
@@ -515,7 +521,7 @@ class TelegramBot:
             return
         from ductor_bot.messenger.telegram.sender import _send_text_chunks
 
-        msg = await _send_text_chunks(self._bot, chat_id, text)
+        msg, _delivered = await _send_text_chunks(self._bot, chat_id, text)
         if msg:
             with contextlib.suppress(TelegramAPIError):
                 await self._bot.pin_chat_message(chat_id, msg.message_id, disable_notification=True)
@@ -986,6 +992,9 @@ class TelegramBot:
                 lines.append(t("session_help.claude_model"))
             elif p == "codex":
                 lines.append(t("session_help.codex_single"))
+            elif p == "grok":
+                lines.append(t("session_help.grok_single"))
+                lines.append(t("session_help.grok_model"))
             else:
                 lines.append(t("session_help.gemini_single"))
                 lines.append(t("session_help.gemini_model"))
@@ -997,6 +1006,8 @@ class TelegramBot:
                 lines.append(t("session_help.codex_multi"))
             if "gemini" in providers:
                 lines.append(t("session_help.gemini_multi"))
+            if "grok" in providers:
+                lines.append(t("session_help.grok_multi"))
             lines.append(t("session_help.explicit"))
 
         lines += [
@@ -1048,7 +1059,7 @@ class TelegramBot:
                 provider_override, model_override = resolved[0], resolved[1] or None
                 prompt = rest
                 # If key was a provider name, check for optional model after it
-                if key in ("claude", "codex", "gemini"):
+                if key in ("claude", "codex", "gemini", "antigravity", "grok"):
                     model_match = re.match(r"([a-zA-Z][a-zA-Z0-9_.-]*)\s+", prompt)
                     if model_match:
                         candidate = model_match.group(1).lower()
@@ -1091,9 +1102,13 @@ class TelegramBot:
                 ns = self._orch.get_named_session(chat_id, session_name)
                 provider = ns.provider if ns else (provider_override or self._orch.config.provider)
                 model = ns.model if ns else ""
-                provider_label = {"claude": "Claude", "codex": "Codex", "gemini": "Gemini"}.get(
-                    provider, provider
-                )
+                provider_label = {
+                    "claude": "Claude",
+                    "codex": "Codex",
+                    "gemini": "Gemini",
+                    "antigravity": "Antigravity",
+                    "grok": "Grok Build",
+                }.get(provider, provider)
                 model_info = f" ({model})" if model else ""
                 await send_rich(
                     self._bot,

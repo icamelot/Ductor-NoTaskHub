@@ -33,19 +33,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_ToolCallback = Callable[[ToolUseEvent], Awaitable[None]]
+
 
 class _StreamCallbacks:
     """Dispatch stream events to the appropriate callbacks."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         on_text: Callable[[str], Awaitable[None]] | None,
-        on_tool: Callable[[str], Awaitable[None]] | None,
+        on_thinking: Callable[[str], Awaitable[None]] | None,
+        on_tool: _ToolCallback | None,
         on_status: Callable[[str | None], Awaitable[None]] | None,
         on_reasoning: Callable[[str], Awaitable[None]] | None = None,
         on_compact_boundary: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._on_text = on_text
+        self._on_thinking = on_thinking
         self._on_tool = on_tool
         self._on_status = on_status
         self._on_reasoning = on_reasoning
@@ -62,12 +66,14 @@ class _StreamCallbacks:
                 await self._on_text(event.text)
             return event.text, None
         if isinstance(event, ThinkingEvent):
+            if event.text and self._on_thinking is not None:
+                await self._on_thinking(event.text)
             if self._on_reasoning is not None and event.text:
                 await self._on_reasoning(event.text)
             elif self._on_status is not None:
                 await self._on_status("thinking")
         elif isinstance(event, ToolUseEvent) and self._on_tool is not None:
-            await self._on_tool(event.tool_name)
+            await self._on_tool(event)
         elif isinstance(event, SystemStatusEvent) and self._on_status is not None:
             await self._on_status(event.status)
         elif isinstance(event, CompactBoundaryEvent):
@@ -106,6 +112,7 @@ class CLIServiceConfig:
     codex_cli_parameters: tuple[str, ...] = ()
     gemini_cli_parameters: tuple[str, ...] = ()
     antigravity_cli_parameters: tuple[str, ...] = ()
+    grok_cli_parameters: tuple[str, ...] = ()
     agent_name: str = "main"
     interagent_port: int = 8799
     # External transcription hooks (#66) — empty strings keep built-in strategies.
@@ -120,6 +127,8 @@ class CLIServiceConfig:
             return list(self.gemini_cli_parameters)
         if provider == "antigravity":
             return list(self.antigravity_cli_parameters)
+        if provider == "grok":
+            return list(self.grok_cli_parameters)
         return list(self.claude_cli_parameters)
 
 
@@ -138,6 +147,20 @@ class CLIService:
         self._models = models
         self._available_providers = available_providers
         self._process_registry = process_registry
+        self._working_dir_resolver: Callable[[AgentRequest], str | None] | None = None
+
+    def set_working_dir_resolver(self, resolver: Callable[[AgentRequest], str | None]) -> None:
+        """Register a callback that maps a request to a per-request working dir.
+
+        The resolver returns an absolute path to use as the CLI working
+        directory, or ``None`` to keep the configured default workspace.
+        """
+        self._working_dir_resolver = resolver
+
+    @property
+    def docker_enabled(self) -> bool:
+        """True when CLI calls run inside a Docker container."""
+        return bool(self._config.docker_container)
 
     def update_available_providers(self, providers: frozenset[str]) -> None:
         self._available_providers = providers
@@ -191,7 +214,8 @@ class CLIService:
         self,
         request: AgentRequest,
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
-        on_tool_activity: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_activity: _ToolCallback | None = None,
         on_system_status: Callable[[str | None], Awaitable[None]] | None = None,
         on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         on_compact_boundary: Callable[[], Awaitable[None]] | None = None,
@@ -210,6 +234,7 @@ class CLIService:
 
         callbacks = _StreamCallbacks(
             on_text_delta,
+            on_thinking_delta,
             on_tool_activity,
             on_system_status,
             on_reasoning_delta,
@@ -337,18 +362,43 @@ class CLIService:
     def _make_cli(self, request: AgentRequest) -> BaseCLI:
         """Create a BaseCLI instance for the given request."""
         provider, model = self.resolve_provider(request)
+        # Per-turn effort: request override wins, else the service default
+        # (mirrors model_override or default_model).
+        effort = request.effort_override or self._config.reasoning_effort
+
+        # Per-request working dir override (project_roots). Skipped in Docker
+        # mode: docker_wrap maps cwd into the container via relative_to() and
+        # would fail on a path outside the workspace.
+        working_dir = self._config.working_dir
+        append_prompt = request.append_system_prompt
+        if self._working_dir_resolver is not None and not self._config.docker_container:
+            override = self._working_dir_resolver(request)
+            if override is not None:
+                working_dir = override
+                # Applied here at the single choke point so every execution
+                # path (normal turns, memory flush/compact, heartbeat) keeps
+                # addressing the bot memory by absolute path — a relative
+                # memory_system/ reference would otherwise land inside the
+                # user's project repo.
+                note = (
+                    f"[ductor] Project cwd override active. The shared bot workspace "
+                    f"(tools/, memory_system/) is at {self._config.working_dir}. Bot memory "
+                    f"lives at {self._config.working_dir}/memory_system/MAINMEMORY.md — always "
+                    f"address it by this absolute path, never via a relative path."
+                )
+                append_prompt = f"{append_prompt}\n\n{note}" if append_prompt else note
 
         return create_cli(
             CLIConfig(
                 provider=provider,
-                working_dir=self._config.working_dir,
+                working_dir=working_dir,
                 model=model,
                 system_prompt=request.system_prompt,
-                append_system_prompt=request.append_system_prompt,
+                append_system_prompt=append_prompt,
                 max_turns=self._config.max_turns,
                 max_budget_usd=self._config.max_budget_usd,
                 permission_mode=self._config.permission_mode,
-                reasoning_effort=self._config.reasoning_effort,
+                reasoning_effort=effort,
                 gemini_api_key=self._config.gemini_api_key,
                 docker_container=self._config.docker_container,
                 process_registry=self._process_registry,

@@ -14,10 +14,12 @@ class BackgroundSubmit:
     prompt: str
     message_id: int
     thread_id: int | None
+    transport: str = "tg"
     session_name: str = ""
     resume_session_id: str = ""
     provider_override: str = ""
     model_override: str = ""
+    reasoning_effort_override: str = ""
 
 
 @dataclass(slots=True)
@@ -29,8 +31,10 @@ class BackgroundTask:
     prompt: str
     message_id: int
     thread_id: int | None
+    transport: str
     provider: str
     model: str
+    reasoning_effort: str
     submitted_at: float
     asyncio_task: asyncio.Task[None] | None = field(default=None, repr=False)
     session_name: str = ""
@@ -45,6 +49,7 @@ class BackgroundResult:
     chat_id: int
     message_id: int
     thread_id: int | None
+    transport: str
     prompt_preview: str
     result_text: str
     status: str

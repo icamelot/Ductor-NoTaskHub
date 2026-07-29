@@ -67,18 +67,6 @@ class TestGet:
         assert registry.get("nonexistent") is None
 
 
-class TestFindByName:
-    def test_finds_by_name(self, registry: TaskRegistry) -> None:
-        registry.create(_submit(name="Hotel Paris"), "claude", "opus")
-        found = registry.find_by_name(42, "hotel paris")
-        assert found is not None
-        assert found.name == "Hotel Paris"
-
-    def test_not_found_wrong_chat(self, registry: TaskRegistry) -> None:
-        registry.create(_submit(name="Test"), "claude", "opus")
-        assert registry.find_by_name(999, "Test") is None
-
-
 class TestUpdateStatus:
     def test_updates_status_and_fields(self, registry: TaskRegistry) -> None:
         entry = registry.create(_submit(), "claude", "opus")
@@ -90,37 +78,6 @@ class TestUpdateStatus:
 
     def test_ignores_unknown_task(self, registry: TaskRegistry) -> None:
         registry.update_status("bogus", "done")  # Should not raise
-
-
-class TestListActive:
-    def test_filters_running(self, registry: TaskRegistry) -> None:
-        e1 = registry.create(_submit(name="A"), "claude", "opus")
-        registry.create(_submit(name="B"), "claude", "opus")
-        registry.update_status(e1.task_id, "done")
-
-        active = registry.list_active(chat_id=42)
-        assert len(active) == 1
-        assert active[0].name == "B"
-
-
-class TestCleanupOld:
-    def test_removes_old_completed(self, registry: TaskRegistry) -> None:
-        entry = registry.create(_submit(), "claude", "opus")
-        registry.update_status(entry.task_id, "done")
-        # Manually set old timestamp
-        entry.created_at = 0.0
-        registry._persist()
-
-        removed = registry.cleanup_old(max_age_hours=1)
-        assert removed == 1
-        assert registry.get(entry.task_id) is None
-
-    def test_keeps_recent(self, registry: TaskRegistry) -> None:
-        entry = registry.create(_submit(), "claude", "opus")
-        registry.update_status(entry.task_id, "done")
-
-        removed = registry.cleanup_old(max_age_hours=1)
-        assert removed == 0
 
 
 class TestCleanupFinished:
@@ -158,6 +115,107 @@ class TestCleanupFinished:
 
     def test_noop_when_empty(self, registry: TaskRegistry) -> None:
         assert registry.cleanup_finished() == 0
+
+
+class TestCleanupFinishedRetention:
+    def test_removes_finished_tasks_older_than_retention(self, registry: TaskRegistry) -> None:
+        old_done = registry.create(_submit(name="old"), "claude", "opus")
+        recent_done = registry.create(_submit(name="recent"), "claude", "opus")
+        running = registry.create(_submit(name="running"), "claude", "opus")
+        waiting = registry.create(_submit(name="waiting"), "claude", "opus")
+
+        registry.update_status(old_done.task_id, "done")
+        registry.update_status(recent_done.task_id, "done")
+        registry.update_status(waiting.task_id, "waiting")
+        old_done.completed_at = 100.0
+        old_done.created_at = 100.0
+        recent_done.completed_at = 10_000.0
+        recent_done.created_at = 10_000.0
+        running.created_at = 100.0
+        waiting.created_at = 100.0
+        registry._persist()
+
+        removed = registry.cleanup_finished_retention(
+            max_age_hours=1,
+            keep_last=100,
+            now=10_000.0,
+        )
+
+        assert removed == 1
+        assert registry.get(old_done.task_id) is None
+        assert registry.get(recent_done.task_id) is not None
+        assert registry.get(running.task_id) is not None
+        assert registry.get(waiting.task_id) is not None
+
+    def test_keeps_only_latest_finished_when_count_exceeds_limit(
+        self, registry: TaskRegistry
+    ) -> None:
+        entries = [registry.create(_submit(name=f"done-{i}"), "claude", "opus") for i in range(4)]
+        for i, entry in enumerate(entries):
+            registry.update_status(entry.task_id, "done")
+            entry.completed_at = float(i + 1)
+            entry.created_at = float(i + 1)
+        registry._persist()
+
+        removed = registry.cleanup_finished_retention(
+            max_age_hours=24,
+            keep_last=2,
+            now=10.0,
+        )
+
+        assert removed == 2
+        assert registry.get(entries[0].task_id) is None
+        assert registry.get(entries[1].task_id) is None
+        assert registry.get(entries[2].task_id) is not None
+        assert registry.get(entries[3].task_id) is not None
+
+    def test_age_limit_overrides_keep_last(self, registry: TaskRegistry) -> None:
+        """Age and count are independent limits: keep_last does not shield old entries."""
+        old = registry.create(_submit(name="old"), "claude", "opus")
+        registry.update_status(old.task_id, "done")
+        old.completed_at = 100.0
+        old.created_at = 100.0
+        registry._persist()
+
+        removed = registry.cleanup_finished_retention(
+            max_age_hours=1,
+            keep_last=100,
+            now=10_000.0,
+        )
+
+        assert removed == 1
+        assert registry.get(old.task_id) is None
+
+    def test_disabled_limits_are_noop(self, registry: TaskRegistry) -> None:
+        entry = registry.create(_submit(name="old"), "claude", "opus")
+        registry.update_status(entry.task_id, "done")
+        entry.completed_at = 1.0
+        registry._persist()
+
+        removed = registry.cleanup_finished_retention(
+            max_age_hours=0,
+            keep_last=0,
+            now=10_000.0,
+        )
+
+        assert removed == 0
+        assert registry.get(entry.task_id) is not None
+
+    def test_removes_finished_task_folder(self, registry: TaskRegistry) -> None:
+        entry = registry.create(_submit(name="old"), "claude", "opus")
+        folder = registry.task_folder(entry.task_id)
+        registry.update_status(entry.task_id, "failed")
+        entry.completed_at = 1.0
+        registry._persist()
+
+        removed = registry.cleanup_finished_retention(
+            max_age_hours=1,
+            keep_last=100,
+            now=10_000.0,
+        )
+
+        assert removed == 1
+        assert not folder.exists()
 
 
 class TestDelete:

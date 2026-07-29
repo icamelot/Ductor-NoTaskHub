@@ -2,14 +2,15 @@ This file gives coding agents a current map of the repository.
 
 ## Project Overview
 
-ductor is a multi-transport chat orchestrator for the official provider CLIs (`claude`, `codex`, `gemini`, `agy`).
-It runs Telegram and/or Matrix, can expose an optional direct WebSocket API, keeps state under `~/.ductor`, and supervises the main agent plus optional sub-agents in one asyncio process.
+ductor is a multi-transport chat orchestrator for the official provider CLIs (`claude`, `codex`, `gemini`, `agy`, `grok`).
+It runs Telegram, Matrix and/or Slack, can expose an optional direct WebSocket API, keeps state under `~/.ductor`, and supervises the main agent plus optional sub-agents in one asyncio process.
 
 Stack:
 
 - Python 3.11+
 - aiogram 3.x (Telegram)
 - matrix-nio (Matrix, optional extra)
+- slack-bolt (Slack, optional extra)
 - aiohttp (webhook server, internal API, optional direct API)
 - Pydantic 2.x
 - asyncio
@@ -68,6 +69,7 @@ Observer / TaskHub / InterAgentBus callback
 | `messenger/` | transport protocol, capabilities, notifications, registry, multi-transport adapter |
 | `messenger/telegram/` | Telegram transport: middleware, handlers, startup, callback routing, file/media UX |
 | `messenger/matrix/` | Matrix transport: sync loop, auth, segment streaming, reaction buttons, media |
+| `messenger/slack/` | Slack transport: Socket Mode bot, native streaming, ID mapping, sender/media |
 | `orchestrator/` | command routing, directives/hooks, flows, provider/session/task wiring, lifecycle split |
 | `bus/` | unified `Envelope`, `MessageBus`, shared `LockPool`, delivery adapters |
 | `cli/` | provider wrappers, stream parsing, auth detection, model caches, process registry |
@@ -93,8 +95,8 @@ Observer / TaskHub / InterAgentBus callback
 - Workspace init is zone-based:
   - Zone 2 overwrite: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, framework-managed tool scripts
   - Zone 3 seed-once: user-owned files
-- Rule sync is mtime-based for sibling `CLAUDE.md` / `AGENTS.md` / `GEMINI.md`; cron task folders additionally get missing rule backfill.
-- Skill sync spans `~/.ductor/workspace/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/skills`:
+- Rule sync is mtime-based for sibling `CLAUDE.md` / `AGENTS.md` / `GEMINI.md`; cron task folders additionally get missing rule backfill. `AGENTS.md` serves Codex **and** Grok — like Codex, Grok loads project rules from `AGENTS.md` (`RulesSelector` deploys it when either is authenticated).
+- Skill sync spans `~/.ductor/workspace/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/skills`, `~/.grok/skills`:
   - normal mode: links/junctions
   - Docker mode: managed copies (`.ductor_managed`)
 - `ductor agents add` is a Telegram-focused scaffold; Matrix sub-agents are supported through `agents.json` or the bundled agent tool scripts.
@@ -111,10 +113,13 @@ All run as in-process asyncio tasks:
 - `CodexCacheObserver`
 - `GeminiCacheObserver`
 - `AntigravityCacheObserver`
+- `GrokCacheObserver`
 - config reloader
 - rule sync watcher
 - skill sync watcher
 - update observer (upgradeable installs)
+
+The four model-cache observers start only for provider CLIs found by startup auth detection (`installed_providers`), not by a plain PATH lookup.
 
 ## Service Backends
 
@@ -145,7 +150,7 @@ Groups:
 - `ductor docker <rebuild|enable|disable|mount|unmount|mounts|extras|extras-add|extras-remove>`
 - `ductor api <enable|disable>`
 - `ductor agents <list|add|remove>`
-- `ductor install <matrix|api>`
+- `ductor install <matrix|slack|api>`
 
 Nuances:
 

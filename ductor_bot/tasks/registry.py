@@ -100,6 +100,7 @@ class TaskRegistry:
         model: str,
         *,
         thinking: str = "",
+        reasoning_effort: str = "",
         tasks_dir: Path | None = None,
         priority: str = "",
     ) -> TaskEntry:
@@ -121,6 +122,7 @@ class TaskRegistry:
             status="running",
             original_prompt=submit.prompt,
             thinking=thinking,
+            reasoning_effort=reasoning_effort,
             tasks_dir=str(resolved_dir),
             thread_id=submit.thread_id,
             priority=normalise_priority(priority or submit.priority),
@@ -138,21 +140,6 @@ class TaskRegistry:
 
     def get(self, task_id: str) -> TaskEntry | None:
         return self._entries.get(task_id)
-
-    def find_by_name(self, chat_id: int, name: str) -> TaskEntry | None:
-        """Find a task by name within a chat."""
-        lower = name.lower()
-        for entry in self._entries.values():
-            if entry.chat_id == chat_id and entry.name.lower() == lower:
-                return entry
-        return None
-
-    def list_active(self, chat_id: int | None = None) -> list[TaskEntry]:
-        """Return tasks with status 'running'."""
-        entries = [e for e in self._entries.values() if e.status == "running"]
-        if chat_id is not None:
-            entries = [e for e in entries if e.chat_id == chat_id]
-        return sorted(entries, key=lambda e: e.created_at)
 
     def list_all(
         self,
@@ -193,15 +180,6 @@ class TaskRegistry:
         """Return the path to a task's TASKMEMORY.md."""
         return self.task_folder(task_id) / "TASKMEMORY.md"
 
-    def cleanup_old(self, max_age_hours: int) -> int:
-        """Remove completed/failed tasks older than *max_age_hours*."""
-        cutoff = time.time() - max_age_hours * 3600
-        to_remove: list[str] = []
-        for task_id, entry in self._entries.items():
-            if entry.status in _FINISHED_STATUSES and entry.created_at < cutoff:
-                to_remove.append(task_id)
-        return self._remove_entries(to_remove, "cleanup_old")
-
     def delete(self, task_id: str) -> bool:
         """Delete a single finished task (entry + folder).
 
@@ -225,6 +203,53 @@ class TaskRegistry:
             to_remove.append(task_id)
         return self._remove_entries(to_remove, "cleanup_finished")
 
+    def cleanup_finished_retention(
+        self,
+        *,
+        max_age_hours: int,
+        keep_last: int,
+        now: float | None = None,
+    ) -> int:
+        """Prune finished task history by age and count.
+
+        Age and count act as independent limits (union of both removal sets):
+        ``keep_last`` does not protect an entry that exceeds ``max_age_hours``.
+        Running/waiting tasks are never removed.  ``completed_at`` is preferred
+        for ordering; older entries may lack it, so fall back to ``created_at``.
+        """
+        if max_age_hours <= 0 and keep_last <= 0:
+            return 0
+
+        current_time = time.time() if now is None else now
+        cutoff = current_time - max_age_hours * 3600 if max_age_hours > 0 else None
+
+        finished = [
+            (task_id, entry)
+            for task_id, entry in self._entries.items()
+            if entry.status in _FINISHED_STATUSES
+        ]
+        to_remove: set[str] = set()
+
+        if cutoff is not None:
+            for task_id, entry in finished:
+                if _finished_sort_time(entry) < cutoff:
+                    to_remove.add(task_id)
+
+        if keep_last > 0:
+            keep = {
+                task_id
+                for task_id, _ in sorted(
+                    finished,
+                    key=lambda item: _finished_sort_time(item[1]),
+                    reverse=True,
+                )[:keep_last]
+            }
+            for task_id, _ in finished:
+                if task_id not in keep:
+                    to_remove.add(task_id)
+
+        return self._remove_entries(sorted(to_remove), "cleanup_finished_retention")
+
     def _remove_entries(self, task_ids: list[str], label: str) -> int:
         """Delete entries and their folders from the registry."""
         # Resolve folder paths before deleting entries (entries carry per-agent
@@ -239,6 +264,11 @@ class TaskRegistry:
             self._persist()
             logger.info("%s removed %d task(s)", label, len(task_ids))
         return len(task_ids)
+
+
+def _finished_sort_time(entry: TaskEntry) -> float:
+    """Return the timestamp used for finished task retention."""
+    return entry.completed_at or entry.created_at
 
 
 # -- Task folder seeding -------------------------------------------------------

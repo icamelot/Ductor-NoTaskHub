@@ -14,6 +14,8 @@ from ductor_bot.background import (
 )
 from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.cli.service import CLIService, CLIServiceConfig
+from ductor_bot.cli.stream_events import ToolUseEvent
+from ductor_bot.cli.types import AgentRequest
 from ductor_bot.config import AgentConfig
 from ductor_bot.cron.manager import CronManager
 from ductor_bot.errors import (
@@ -29,6 +31,7 @@ from ductor_bot.infra.inflight import InflightTracker
 from ductor_bot.orchestrator.commands import (
     cmd_cron,
     cmd_diagnose,
+    cmd_effort,
     cmd_memory,
     cmd_model,
     cmd_reset,
@@ -64,13 +67,13 @@ from ductor_bot.session.manager import SessionData
 from ductor_bot.session.named import NamedSessionRegistry
 from ductor_bot.webhook.manager import WebhookManager
 from ductor_bot.workspace.paths import DuctorPaths
+from ductor_bot.workspace.project_roots import resolve_project_root
 
 if TYPE_CHECKING:
     from ductor_bot.background import BackgroundObserver
     from ductor_bot.bus.bus import MessageBus
     from ductor_bot.bus.lock_pool import LockPool
     from ductor_bot.config import ModelRegistry
-    from ductor_bot.multiagent.bus import AsyncInterAgentResult
     from ductor_bot.multiagent.supervisor import AgentSupervisor
     from ductor_bot.session.named import NamedSession
     from ductor_bot.tasks.hub import TaskHub
@@ -79,6 +82,7 @@ logger = logging.getLogger(__name__)
 
 
 _TextCallback = Callable[[str], Awaitable[None]]
+_ToolCallback = Callable[[ToolUseEvent], Awaitable[None]]
 _SystemStatusCallback = Callable[[str | None], Awaitable[None]]
 _ReasoningCallback = Callable[[str], Awaitable[None]]
 
@@ -89,8 +93,10 @@ class NamedSessionRequest:
 
     message_id: int
     thread_id: int | None
+    transport: str = "tg"
     provider_override: str | None = None
     model_override: str | None = None
+    reasoning_effort_override: str | None = None
 
 
 @dataclass(slots=True)
@@ -102,7 +108,8 @@ class _MessageDispatch:
     cmd: str
     streaming: bool = False
     on_text_delta: _TextCallback | None = None
-    on_tool_activity: _TextCallback | None = None
+    on_thinking_delta: _TextCallback | None = None
+    on_tool_activity: _ToolCallback | None = None
     on_system_status: _SystemStatusCallback | None = None
     on_reasoning_delta: _ReasoningCallback | None = None
 
@@ -110,6 +117,7 @@ class _MessageDispatch:
         """Bundle the streaming callbacks into a StreamingCallbacks instance."""
         return StreamingCallbacks(
             on_text_delta=self.on_text_delta,
+            on_thinking_delta=self.on_thinking_delta,
             on_tool_activity=self.on_tool_activity,
             on_system_status=self.on_system_status,
             on_reasoning_delta=self.on_reasoning_delta,
@@ -151,6 +159,7 @@ class Orchestrator:
                 codex_cli_parameters=tuple(config.cli_parameters.codex),
                 gemini_cli_parameters=tuple(config.cli_parameters.gemini),
                 antigravity_cli_parameters=tuple(config.cli_parameters.antigravity),
+                grok_cli_parameters=tuple(config.cli_parameters.grok),
                 agent_name=agent_name,
                 interagent_port=interagent_port,
                 transcribe_command=config.transcription.audio_command,
@@ -160,6 +169,7 @@ class Orchestrator:
             available_providers=frozenset(),
             process_registry=self._process_registry,
         )
+        self._cli_service.set_working_dir_resolver(self._resolve_request_working_dir)
         self._cron_manager = CronManager(jobs_path=paths.cron_jobs_path)
         self._webhook_manager = WebhookManager(hooks_path=paths.webhooks_path)
         self._observers = ObserverManager(config, paths)
@@ -169,9 +179,10 @@ class Orchestrator:
             topic_id: int | None = None,
             prompt: str | None = None,
             ack_token: str | None = None,
+            transport: str = "tg",
         ) -> str | None:
             return await self.handle_heartbeat(
-                SessionKey(chat_id=chat_id, topic_id=topic_id),
+                SessionKey.for_transport(transport, chat_id, topic_id),
                 prompt=prompt,
                 ack_token=ack_token,
             )
@@ -204,6 +215,22 @@ class Orchestrator:
         self._task_hub: TaskHub | None = None  # Set by supervisor or __main__.py
         self._command_registry = CommandRegistry()
         self._register_commands()
+
+    def _resolve_request_working_dir(self, request: AgentRequest) -> str | None:
+        """Map a CLI request to a per-topic project root, if configured.
+
+        Returns ``None`` (keep the default workspace) for named sessions —
+        their resume consistency depends on a stable working dir — and when
+        no ``project_roots`` entry matches the request's topic.
+        """
+        if request.process_label.startswith("ns:"):
+            return None  # named sessions stay in workspace (resume consistency)
+        return resolve_project_root(
+            self._config.project_roots,
+            chat_id=request.chat_id,
+            topic_id=request.topic_id,
+            topic_name=self._sessions.resolve_topic_name(request.chat_id, request.topic_id),
+        )
 
     @property
     def paths(self) -> DuctorPaths:
@@ -309,7 +336,8 @@ class Orchestrator:
         text: str,
         *,
         on_text_delta: _TextCallback | None = None,
-        on_tool_activity: _TextCallback | None = None,
+        on_thinking_delta: _TextCallback | None = None,
+        on_tool_activity: _ToolCallback | None = None,
         on_system_status: _SystemStatusCallback | None = None,
         on_reasoning_delta: _ReasoningCallback | None = None,
     ) -> OrchestratorResult:
@@ -320,6 +348,7 @@ class Orchestrator:
             cmd=text.strip().lower(),
             streaming=True,
             on_text_delta=on_text_delta,
+            on_thinking_delta=on_thinking_delta,
             on_tool_activity=on_tool_activity,
             on_system_status=on_system_status,
             on_reasoning_delta=on_reasoning_delta,
@@ -418,6 +447,7 @@ class Orchestrator:
         reg.register_async("/status", cmd_status)
         reg.register_async("/model", cmd_model)
         reg.register_async("/model ", cmd_model)
+        reg.register_async("/effort", cmd_effort)
         reg.register_async("/memory", cmd_memory)
         reg.register_async("/cron", cmd_cron)
         reg.register_async("/diagnose", cmd_diagnose)
@@ -446,11 +476,6 @@ class Orchestrator:
         reg.register_async("/agent_restart", cmd_agent_restart)
         reg.register_async("/agent_restart ", cmd_agent_restart)
         logger.info("Multi-agent commands registered")
-
-    async def reset_session(self, key: SessionKey) -> None:
-        """Reset the session for a given key."""
-        await self._sessions.reset_session(key)
-        logger.info("Session reset")
 
     async def reset_current_provider_session(self, key: SessionKey) -> str:
         """Reset the bucket the user is currently on, keeping that provider active.
@@ -573,16 +598,36 @@ class Orchestrator:
                 request.provider_override
             )
 
-        ns = self._named_sessions.create(chat_id, provider_name, model_name, prompt)
+        # Effective effort at creation: explicit override or the global default
+        # (mirrors model_name from self._config.model). Re-validate against the
+        # session's resolved provider and reset to a safe default when the
+        # carried-over effort is unsupported (e.g. global Claude ``max`` -> a
+        # @codex session) so an invalid value never reaches the CLI. Mirrors the
+        # provider-switch reset in model_selector.switch_model.
+        from ductor_bot.orchestrator.selectors.model_selector import _validate_reasoning_effort
+
+        effort = request.reasoning_effort_override or self._config.reasoning_effort
+        if effort and _validate_reasoning_effort(self, model_name, effort) is not None:
+            effort = "medium"
+        ns = self._named_sessions.create(
+            chat_id,
+            provider_name,
+            model_name,
+            prompt,
+            reasoning_effort=effort,
+            key=SessionKey.for_transport(request.transport, chat_id, request.thread_id),
+        )
         exec_config = resolve_cli_config(self._config, self._observers.codex_cache)
         sub = BackgroundSubmit(
             chat_id=chat_id,
             prompt=prompt,
             message_id=request.message_id,
             thread_id=request.thread_id,
+            transport=request.transport,
             session_name=ns.name,
             provider_override=provider_name,
             model_override=model_name,
+            reasoning_effort_override=effort,
         )
         task_id = self._observers.background.submit(sub, exec_config)
         return task_id, ns.name
@@ -613,17 +658,36 @@ class Orchestrator:
             msg = f"Session '{session_name}' is still processing"
             raise ValueError(msg)
 
-        self._named_sessions.mark_running(chat_id, session_name, prompt)
+        self._named_sessions.mark_running(
+            chat_id,
+            session_name,
+            prompt,
+            transport=ns.transport,
+            topic_id=thread_id,
+        )
         exec_config = resolve_cli_config(self._config, self._observers.codex_cache)
+        # Follow-up keeps the session's provider/model; defensively re-validate
+        # the carried-over effort against ns.model (resets a stale/unsupported
+        # value to a safe default before it reaches the CLI).
+        from ductor_bot.orchestrator.selectors.model_selector import _validate_reasoning_effort
+
+        followup_effort = ns.reasoning_effort
+        if (
+            followup_effort
+            and _validate_reasoning_effort(self, ns.model, followup_effort) is not None
+        ):
+            followup_effort = "medium"
         sub = BackgroundSubmit(
             chat_id=chat_id,
             prompt=prompt,
             message_id=message_id,
-            thread_id=thread_id,
+            thread_id=thread_id if thread_id is not None else ns.topic_id,
+            transport=ns.transport,
             session_name=session_name,
             resume_session_id=ns.session_id,
             provider_override=ns.provider,
             model_override=ns.model,
+            reasoning_effort_override=followup_effort,
         )
         return self._observers.background.submit(sub, exec_config)
 
@@ -757,26 +821,22 @@ class Orchestrator:
         message: str,
         *,
         new_session: bool = False,
+        source_chat_id: int = 0,
+        source_topic_id: int | None = None,
     ) -> tuple[str, str, str]:
         """Process a message from another agent via the InterAgentBus."""
         from ductor_bot.orchestrator.injection import (
             handle_interagent_message as _handle_ia,
         )
 
-        return await _handle_ia(self, sender, message, new_session=new_session)
-
-    async def handle_async_interagent_result(
-        self,
-        result: AsyncInterAgentResult,
-        *,
-        chat_id: int = 0,
-    ) -> str:
-        """Inject an async inter-agent result into the current active session."""
-        from ductor_bot.orchestrator.injection import (
-            handle_async_interagent_result as _handle_async_ia,
+        return await _handle_ia(
+            self,
+            sender,
+            message,
+            new_session=new_session,
+            source_chat_id=source_chat_id,
+            source_topic_id=source_topic_id,
         )
-
-        return await _handle_async_ia(self, result, chat_id=chat_id)
 
     async def inject_prompt(
         self,

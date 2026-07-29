@@ -11,7 +11,6 @@ from ductor_bot.bus.adapters import (
     from_interagent_result,
     from_task_question,
     from_task_result,
-    from_user_message,
     from_webhook_cron_result,
     from_webhook_wake,
 )
@@ -26,6 +25,7 @@ class _FakeBackgroundResult:
     chat_id: int = 100
     message_id: int = 42
     thread_id: int | None = None
+    transport: str = "tg"
     prompt_preview: str = "do something"
     result_text: str = "done"
     status: str = "success"
@@ -87,6 +87,8 @@ def test_from_background_result() -> None:
     env = from_background_result(_FakeBackgroundResult())
     assert env.origin == Origin.BACKGROUND
     assert env.chat_id == 100
+    assert env.topic_id is None
+    assert env.transport == "tg"
     assert env.delivery == DeliveryMode.UNICAST
     assert env.lock_mode == LockMode.NONE
     assert not env.needs_injection
@@ -99,6 +101,13 @@ def test_from_background_result() -> None:
 def test_from_background_result_error() -> None:
     env = from_background_result(_FakeBackgroundResult(status="error:timeout"))
     assert env.is_error
+
+
+def test_from_background_result_preserves_transport_and_thread_target() -> None:
+    env = from_background_result(_FakeBackgroundResult(thread_id=9, transport="sl"))
+    assert env.topic_id == 9
+    assert env.thread_id == 9
+    assert env.transport == "sl"
 
 
 def test_from_cron_result() -> None:
@@ -141,6 +150,13 @@ def test_from_heartbeat_with_topic_id() -> None:
     assert env.topic_id == 42
     assert env.delivery == DeliveryMode.UNICAST
     assert env.result_text == "group alert"
+
+
+def test_from_heartbeat_preserves_transport() -> None:
+    env = from_heartbeat(200, "alert text", topic_id=7, transport="sl")
+    assert env.chat_id == 200
+    assert env.topic_id == 7
+    assert env.transport == "sl"
 
 
 def test_from_webhook_cron_result() -> None:
@@ -297,43 +313,3 @@ def test_from_task_question_with_topic() -> None:
     env = from_task_question("t1", "what color?", "what co...", 100, topic_id=42)
     assert env.chat_id == 100
     assert env.topic_id == 42
-
-
-# -- User / API messages -------------------------------------------------------
-
-
-def test_from_user_message_default_origin() -> None:
-    env = from_user_message(100, "hello world")
-    assert env.origin == Origin.USER
-    assert env.chat_id == 100
-    assert env.prompt == "hello world"
-    assert env.prompt_preview == "hello world"
-    assert env.delivery == DeliveryMode.UNICAST
-    assert env.lock_mode == LockMode.NONE
-    assert env.topic_id is None
-
-
-def test_from_user_message_api_source() -> None:
-    env = from_user_message(200, "api request", source=Origin.API)
-    assert env.origin == Origin.API
-    assert env.chat_id == 200
-    assert env.prompt == "api request"
-
-
-def test_from_user_message_with_topic() -> None:
-    env = from_user_message(300, "topic msg", topic_id=42)
-    assert env.chat_id == 300
-    assert env.topic_id == 42
-
-
-def test_from_user_message_truncates_preview() -> None:
-    long_text = "x" * 200
-    env = from_user_message(100, long_text)
-    assert len(env.prompt_preview) == 80
-    assert env.prompt == long_text
-
-
-def test_from_user_message_empty_text() -> None:
-    env = from_user_message(100, "")
-    assert env.prompt == ""
-    assert env.prompt_preview == ""

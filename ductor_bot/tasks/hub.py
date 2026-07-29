@@ -9,6 +9,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from ductor_bot.cli.types import AgentRequest
 from ductor_bot.tasks.models import (
     TaskEntry,
     TaskInFlight,
@@ -16,6 +17,7 @@ from ductor_bot.tasks.models import (
     TaskSubmit,
     normalise_priority,
 )
+from ductor_bot.workspace.loader import build_appended_files_block
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -71,13 +73,14 @@ class TaskHub:
     question handling → result delivery.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         registry: TaskRegistry,
         paths: DuctorPaths,
         *,
         cli_service: CLIService | None = None,
         config: TasksConfig,
+        append_system_prompt_files: list[str] | None = None,
         process_registry: ProcessRegistry | None = None,
     ) -> None:
         self._registry = registry
@@ -85,6 +88,8 @@ class TaskHub:
         self._cli_service = cli_service
         self._cli_services: dict[str, CLIService] = {}
         self._agent_tasks_dirs: dict[str, Path] = {}
+        self._agent_paths: dict[str, DuctorPaths] = {}
+        self._append_system_prompt_files = append_system_prompt_files or []
         self._config = config
         self._in_flight: dict[str, TaskInFlight] = {}
         self._result_handlers: dict[str, TaskResultCallback] = {}
@@ -98,6 +103,7 @@ class TaskHub:
         # per-agent lookups take precedence via ``_agent_process_registries``.
         self._process_registry = process_registry
         self._agent_process_registries: dict[str, ProcessRegistry] = {}
+        self._pending_deliveries: set[asyncio.Task[None]] = set()
 
     def start_maintenance(self) -> None:
         """Start periodic orphan cleanup (call once after bot startup)."""
@@ -145,6 +151,7 @@ class TaskHub:
     def set_agent_paths(self, agent_name: str, paths: DuctorPaths) -> None:
         """Register per-agent paths for task folder isolation."""
         self._agent_tasks_dirs[agent_name] = paths.tasks_dir
+        self._agent_paths[agent_name] = paths
 
     def set_agent_chat_id(self, agent_name: str, chat_id: int) -> None:
         """Register the primary chat_id for an agent (for resolving CLI-submitted tasks)."""
@@ -189,6 +196,7 @@ class TaskHub:
         provider = submit.provider_override or ""
         model = submit.model_override or ""
         thinking = submit.thinking_override or ""
+        reasoning_effort = submit.reasoning_effort_override or ""
 
         # Resolve per-agent tasks_dir for folder isolation
         agent_tasks_dir = self._agent_tasks_dirs.get(submit.parent_agent)
@@ -197,6 +205,7 @@ class TaskHub:
             provider,
             model,
             thinking=thinking,
+            reasoning_effort=reasoning_effort,
             tasks_dir=agent_tasks_dir,
             priority=priority,
         )
@@ -232,6 +241,16 @@ class TaskHub:
             raise ValueError(msg)
         if not entry.provider:
             msg = f"Task '{task_id}' has no provider recorded"
+            raise ValueError(msg)
+
+        # #158: the persisted status can lag behind the actual execution
+        # (e.g. a stale "waiting"/"done" while the subprocess still runs).
+        # Never spawn a second run for the same task_id — _spawn() would
+        # overwrite the in-flight handle and the two runs would race on
+        # status updates and result delivery.
+        inflight = self._in_flight.get(task_id)
+        if inflight and inflight.asyncio_task and not inflight.asyncio_task.done():
+            msg = f"Task '{task_id}' is already running"
             raise ValueError(msg)
 
         # Reset to running — same entry, same folder, same task_id
@@ -349,6 +368,7 @@ class TaskHub:
         """
         inflight = self._in_flight.get(task_id)
         if inflight is None or inflight.asyncio_task is None or inflight.asyncio_task.done():
+            logger.info("Cancel requested for non-running task id=%s", task_id)
             return False
         registry = self._resolve_process_registry(inflight.entry.parent_agent)
         if registry is not None:
@@ -356,6 +376,7 @@ class TaskHub:
         inflight.asyncio_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await inflight.asyncio_task
+        logger.info("Task cancel accepted id=%s name='%s'", task_id, inflight.entry.name)
         return True
 
     async def cancel_all(self, chat_id: int) -> int:
@@ -385,18 +406,8 @@ class TaskHub:
         for atask in cancelled:
             atask.cancel()
         await asyncio.gather(*cancelled, return_exceptions=True)
+        logger.info("Task cancel accepted for %d task(s) chat=%s", len(cancelled), chat_id)
         return len(cancelled)
-
-    def active_tasks(self, chat_id: int | None = None) -> list[TaskEntry]:
-        """Return in-flight task entries."""
-        entries = [
-            t.entry
-            for t in self._in_flight.values()
-            if t.asyncio_task and not t.asyncio_task.done()
-        ]
-        if chat_id is not None:
-            entries = [e for e in entries if e.chat_id == chat_id]
-        return entries
 
     async def shutdown(self) -> None:
         """Cancel all in-flight tasks and clean up."""
@@ -414,20 +425,74 @@ class TaskHub:
         if cancelled:
             await asyncio.gather(*cancelled, return_exceptions=True)
         self._in_flight.clear()
+        if self._pending_deliveries:
+            await asyncio.gather(*self._pending_deliveries, return_exceptions=True)
 
     async def _maintenance_loop(self) -> None:
-        """Periodically clean orphaned task entries/folders (every 5 hours)."""
+        """Periodically clean orphaned task entries/folders and old finished tasks."""
         try:
             while True:
-                await asyncio.sleep(_MAINTENANCE_INTERVAL)
                 try:
-                    removed = self._registry.cleanup_orphans()
-                    if removed:
-                        logger.info("Task maintenance: removed %d orphan(s)", removed)
+                    self._run_maintenance_once()
                 except Exception:
                     logger.exception("Task maintenance failed (continuing)")
+                await asyncio.sleep(_MAINTENANCE_INTERVAL)
         except asyncio.CancelledError:
             pass
+
+    def _run_maintenance_once(self) -> None:
+        """Run one task registry maintenance pass."""
+        removed = self._registry.cleanup_orphans()
+        if removed:
+            logger.info("Task maintenance: removed %d orphan(s)", removed)
+        pruned = self._registry.cleanup_finished_retention(
+            max_age_hours=self._config.finished_retention_hours,
+            keep_last=self._config.finished_keep_last,
+        )
+        if pruned:
+            logger.info("Task maintenance: pruned %d finished task(s)", pruned)
+
+    def _start_final_delivery(self, result: TaskResult) -> asyncio.Task[None]:
+        delivery_task = asyncio.create_task(self._deliver(result))
+        self._pending_deliveries.add(delivery_task)
+        delivery_task.add_done_callback(self._pending_deliveries.discard)
+        return delivery_task
+
+    async def _prepare_request(
+        self,
+        entry: TaskEntry,
+        prompt: str,
+        cli: CLIService,
+        resume_session: str | None,
+    ) -> AgentRequest:
+        """Build the CLI request for a task run and pre-resolve provider/model."""
+        agent_paths = self._agent_paths.get(entry.parent_agent, self._paths)
+        files_block = await build_appended_files_block(
+            agent_paths, self._append_system_prompt_files
+        )
+
+        request = AgentRequest(
+            prompt=prompt,
+            append_system_prompt=files_block,
+            model_override=entry.model or None,
+            provider_override=entry.provider or None,
+            effort_override=entry.reasoning_effort or None,
+            chat_id=entry.chat_id,
+            topic_id=entry.thread_id,
+            process_label=f"task:{entry.task_id}",
+            timeout_seconds=self._config.timeout_seconds,
+            resume_session=resume_session,
+        )
+
+        # Pre-resolve effective provider/model so the entry is never empty
+        eff_provider, eff_model = cli.resolve_provider(request)
+        if eff_provider and not entry.provider:
+            self._registry.update_status(
+                entry.task_id, "running", provider=eff_provider, model=eff_model
+            )
+            entry.provider = eff_provider
+            entry.model = eff_model
+        return request
 
     async def _run(
         self,
@@ -438,35 +503,14 @@ class TaskHub:
         resume_session: str | None = None,
     ) -> None:
         """Execute task as CLI subprocess."""
-        from ductor_bot.cli.types import AgentRequest
-
         cli = self._cli_services.get(entry.parent_agent) or self._cli_service
         assert cli is not None
 
         t0 = time.monotonic()
+        final_delivery_started = False
         try:
             timeout = self._config.timeout_seconds
-
-            request = AgentRequest(
-                prompt=prompt,
-                model_override=entry.model or None,
-                provider_override=entry.provider or None,
-                chat_id=entry.chat_id,
-                topic_id=entry.thread_id,
-                process_label=f"task:{entry.task_id}",
-                timeout_seconds=timeout,
-                resume_session=resume_session,
-            )
-
-            # Pre-resolve effective provider/model so the entry is never empty
-            eff_provider, eff_model = cli.resolve_provider(request)
-            if eff_provider and not entry.provider:
-                self._registry.update_status(
-                    entry.task_id, "running", provider=eff_provider, model=eff_model
-                )
-                entry.provider = eff_provider
-                entry.model = eff_model
-
+            request = await self._prepare_request(entry, prompt, cli, resume_session)
             response = await cli.execute(request)
 
             elapsed = time.monotonic() - t0
@@ -505,27 +549,36 @@ class TaskHub:
                     f'python3 tools/task_tools/resume_task.py {entry.task_id} "your follow-up"'
                 )
 
-            await self._deliver(
-                TaskResult(
-                    task_id=entry.task_id,
-                    chat_id=entry.chat_id,
-                    parent_agent=entry.parent_agent,
-                    name=entry.name,
-                    prompt_preview=entry.prompt_preview,
-                    result_text=result_text,
-                    status=status,
-                    elapsed_seconds=elapsed,
-                    provider=entry.provider,
-                    model=entry.model,
-                    session_id=session_id,
-                    error=error,
-                    task_folder=str(self._registry.task_folder(entry.task_id)),
-                    original_prompt=entry.original_prompt,
-                    thread_id=entry.thread_id,
+            final_delivery_started = True
+            await asyncio.shield(
+                self._start_final_delivery(
+                    TaskResult(
+                        task_id=entry.task_id,
+                        chat_id=entry.chat_id,
+                        parent_agent=entry.parent_agent,
+                        name=entry.name,
+                        prompt_preview=entry.prompt_preview,
+                        result_text=result_text,
+                        status=status,
+                        elapsed_seconds=elapsed,
+                        provider=entry.provider,
+                        model=entry.model,
+                        session_id=session_id,
+                        error=error,
+                        task_folder=str(self._registry.task_folder(entry.task_id)),
+                        original_prompt=entry.original_prompt,
+                        thread_id=entry.thread_id,
+                    )
                 )
             )
 
         except asyncio.CancelledError:
+            if final_delivery_started:
+                logger.info(
+                    "Task %s cancelled after completion — finished result preserved",
+                    entry.task_id,
+                )
+                raise
             elapsed = time.monotonic() - t0
             self._registry.update_status(
                 entry.task_id,

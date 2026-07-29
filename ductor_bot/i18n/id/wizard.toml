@@ -11,6 +11,7 @@ claude = "  Claude Code CLI   {status}"
 codex = "  OpenAI Codex CLI  {status}"
 gemini = "  Google Gemini CLI {status}"
 antigravity = "  Antigravity CLI   {status}"
+grok = "  xAI Grok CLI      {status}"
 no_auth = """\
 \n[bold red]Setidaknya satu CLI harus terpasang dan terautentikasi.[/bold red]\n
   Claude: [dim]https://docs.anthropic.com/en/docs/claude-code[/dim]
@@ -20,6 +21,7 @@ claude_check_failed = "[yellow]Claude auth check raised: {error}. Skipping.[/yel
 codex_check_failed = "[yellow]Codex auth check raised: {error}. Skipping.[/yellow]"
 gemini_check_failed = "[yellow]Gemini auth check raised: {error}. Skipping.[/yellow]"
 antigravity_check_failed = "[yellow]Antigravity auth check raised: {error}. Skipping.[/yellow]"
+grok_check_failed = "[yellow]Grok auth check raised: {error}. Skipping.[/yellow]"
 
 [disclaimer]
 title = "[bold yellow]Penafian[/bold yellow]"
@@ -41,7 +43,8 @@ title = "[bold]Transport Pesan[/bold]"
 body = """\
 [bold]Pilih cara pengguna berkomunikasi dengan bot:[/bold]\n
   [bold cyan]Telegram[/bold cyan]  — Memerlukan token bot dari @BotFather
-  [bold cyan]Matrix[/bold cyan]    — Memerlukan akun Matrix di homeserver (mis. Element)"""
+  [bold cyan]Matrix[/bold cyan]    — Memerlukan akun Matrix di homeserver (mis. Element)
+  [bold cyan]Slack[/bold cyan]     — Memerlukan token bot/app Slack dan ekstra Slack"""
 prompt = "Pilih transport:"
 
 [telegram.token]
@@ -104,6 +107,44 @@ body = """\
 [dim]Format: @username:homeserver.domain[/dim]"""
 prompt = "ID pengguna Matrix Anda:"
 error = "[red]Format tidak valid. Diharapkan: @user:domain (mis. @nik:matrix.org)[/red]"
+
+[slack.bot_token]
+title = "[bold]Token Bot Slack[/bold]"
+body = """\
+[bold]Masukkan token bot Slack Anda.[/bold]\n
+  Salin [bold cyan]Bot User OAuth Token[/bold cyan] dari aplikasi Slack Anda.\n
+[dim]Format: xoxb-...[/dim]"""
+prompt = "Token bot:"
+error = "[red]Token bot tidak valid. Diharapkan token yang diawali dengan xoxb-[/red]"
+
+[slack.app_token]
+title = "[bold]Token Aplikasi Slack[/bold]"
+body = """\
+[bold]Masukkan token tingkat aplikasi Slack Anda.[/bold]\n
+  Aktifkan Socket Mode di aplikasi Slack Anda dan buat token aplikasi dengan
+  scope [bold cyan]connections:write[/bold cyan].\n
+[dim]Format: xapp-...[/dim]"""
+prompt = "Token aplikasi:"
+error = "[red]Token aplikasi tidak valid. Diharapkan token yang diawali dengan xapp-[/red]"
+
+[slack.allowed_channels]
+title = "[bold]Channel yang Diizinkan[/bold]"
+body = """\
+[bold]Dari channel Slack mana bot boleh menerima pesan?[/bold]\n
+  Masukkan satu atau beberapa ID channel yang dipisahkan koma atau spasi.\n
+  Biarkan kosong untuk mengizinkan semua channel tempat bot diundang.\n
+[dim]Contoh: C0123456789, G0123456789[/dim]"""
+prompt = "ID channel yang diizinkan (opsional):"
+error = "[red]ID channel Slack tidak valid. Gunakan ID C... atau G... yang dipisahkan koma/spasi.[/red]"
+
+[slack.allowed_users]
+title = "[bold]Pengguna yang Diizinkan[/bold]"
+body = """\
+[bold]Pengguna Slack mana yang diizinkan berbicara dengan bot?[/bold]\n
+  Masukkan satu atau beberapa ID pengguna Slack yang dipisahkan koma atau spasi.\n
+[dim]Contoh: U0123456789[/dim]"""
+prompt = "ID pengguna yang diizinkan:"
+error = "[red]ID pengguna Slack tidak valid. Gunakan satu atau beberapa ID U... yang dipisahkan koma/spasi.[/red]"
 
 [docker]
 title = "[bold]Docker Sandboxing[/bold]"

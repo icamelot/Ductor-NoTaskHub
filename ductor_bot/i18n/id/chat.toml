@@ -106,6 +106,7 @@ header = "**Status**"
 no_session = "Tidak ada sesi aktif."
 model_line = "Model: {model}"
 model_line_configured = "Model: {model} (dikonfigurasi: {configured})"
+effort_line = "Upaya: {effort}"
 topic_line = "Topik: {topic}"
 session_line = "Sesi: `{sid}`"
 messages_line = "Pesan: {count}"
@@ -217,7 +218,7 @@ model_line = "Model: {model}"
 model_change = "Model: {old} -> {new}"
 provider_change = "Provider: {old} -> {new}"
 reasoning_line = "Penalaran: {effort}"
-effort_updated = "Upaya penalaran diperbarui."
+effort_updated = "Upaya penalaran disetel ke {effort}."
 already_running = "Sudah menggunakan {model}. Tidak ada perubahan."
 
 resume_hint = """\
@@ -234,6 +235,7 @@ select_claude = "Pilih model Claude:"
 select_gemini = "Pilih model Gemini:"
 select_codex = "Pilih model Codex:"
 select_antigravity = "Pilih model Antigravity:"
+select_grok = "Pilih model Grok Build:"
 no_codex = "Tidak ada model Codex yang tersedia."
 no_gemini = "Tidak ada model Gemini yang ditemukan dari file lokal Gemini CLI."
 thinking_level = "Tingkat berpikir untuk {model}:"
@@ -305,6 +307,7 @@ header = "**ductor.dev**"
 version = "Versi: `{version}`"
 telegram_description = "Agen AI coding (Claude, Codex, Gemini) di Telegram.\nSesi bernama, memori persisten, cron job, webhook, streaming langsung."
 matrix_description = "Agen AI coding (Claude, Codex, Gemini) di Matrix.\nSesi bernama, memori persisten, cron job, webhook, streaming langsung."
+slack_description = "Agen AI coding (Claude, Codex, Gemini) di Slack.\nSesi bernama, memori persisten, cron job, webhook, streaming langsung."
 
 # -- Help (categories) --------------------------------------------------------
 
@@ -317,6 +320,7 @@ cat_browse = "Jelajah & Info"
 cat_maintenance = "Pemeliharaan"
 footer = "Kirim pesan apa pun untuk mulai bekerja dengan agen Anda."
 matrix_footer = "Gunakan awalan `!` atau `/`. Kirim pesan apa pun untuk memulai."
+slack_footer = "Gunakan perintah seperti `help` atau `/help`. Kirim pesan lain untuk memulai."
 
 # -- Multi-agent ---------------------------------------------------------------
 
@@ -406,10 +410,13 @@ default_provider = "`/session <prompt>` — provider default"
 claude_single = "`/session <prompt>` — berjalan di Claude"
 claude_model = "`/session @opus <prompt>` — model spesifik"
 codex_single = "`/session <prompt>` — berjalan di Codex"
+grok_single = "`/session <prompt>` — berjalan di Grok Build"
 gemini_single = "`/session <prompt>` — berjalan di Gemini"
 gemini_model = "`/session @flash <prompt>` — model spesifik"
+grok_model = "`/session @grok-4.5 <prompt>` — model spesifik"
 claude_multi = "`/session @opus <prompt>` — Claude (opus)"
 codex_multi = "`/session @codex <prompt>` — Codex"
+grok_multi = "`/session @grok <prompt>` — Grok Build"
 gemini_multi = "`/session @flash <prompt>` — Gemini (flash)"
 explicit = "`/session @provider model <prompt>` — eksplisit"
 
@@ -449,3 +456,7 @@ changelog_header = "**Catatan Rilis v{version}**"
 
 [multiagent]
 async_task_received = "📥 **Tugas async diterima** dari `{sender}`\nSesi: `{session}` · ID Tugas: `{task_id}`\n\n_{preview}_"
+
+[effort]
+select = "Pilih upaya penalaran untuk {model}:"
+unsupported = "Upaya penalaran tidak dapat diatur untuk penyedia `{provider}`."

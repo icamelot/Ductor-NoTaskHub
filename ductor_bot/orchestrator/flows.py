@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from ductor_bot.cli.stream_events import ToolUseEvent
 from ductor_bot.cli.timeout_controller import TimeoutConfig as TCConfig
 from ductor_bot.cli.timeout_controller import TimeoutController
 from ductor_bot.cli.types import AgentRequest, AgentResponse
@@ -22,7 +23,7 @@ from ductor_bot.orchestrator.hooks import HookContext
 from ductor_bot.orchestrator.registry import OrchestratorResult
 from ductor_bot.session import SessionData, SessionKey
 from ductor_bot.text.response_format import session_error_text, timeout_error_text
-from ductor_bot.workspace.loader import read_mainmemory
+from ductor_bot.workspace.loader import build_appended_files_block, read_mainmemory
 
 if TYPE_CHECKING:
     from ductor_bot.orchestrator.core import Orchestrator
@@ -35,7 +36,8 @@ class StreamingCallbacks:
     """Bundle of optional streaming callbacks passed through flow functions."""
 
     on_text_delta: Callable[[str], Awaitable[None]] | None = field(default=None)
-    on_tool_activity: Callable[[str], Awaitable[None]] | None = field(default=None)
+    on_thinking_delta: Callable[[str], Awaitable[None]] | None = field(default=None)
+    on_tool_activity: Callable[[ToolUseEvent], Awaitable[None]] | None = field(default=None)
     on_system_status: Callable[[str | None], Awaitable[None]] | None = field(default=None)
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = field(default=None)
 
@@ -94,19 +96,23 @@ async def _prepare_normal(
     """
     requested_model = model_override or orch._config.model
     req_model, req_provider = orch.resolve_runtime_target(requested_model)
+    requested_effort = orch._config.reasoning_effort
 
     session, is_new = await orch._sessions.resolve_session(
         key,
         provider=req_provider,
         model=req_model,
+        reasoning_effort=requested_effort,
         preserve_existing_target=model_override is None,
     )
     req_model = session.model
     req_provider = session.provider
+    req_effort = session.reasoning_effort
     await orch._sessions.sync_session_target(
         session,
         provider=req_provider,
         model=req_model,
+        reasoning_effort=req_effort,
     )
     if session.session_id:
         set_log_context(session_id=session.session_id)
@@ -127,6 +133,12 @@ async def _prepare_normal(
         if roster:
             append_prompt = f"{append_prompt}\n\n{roster}" if append_prompt else roster
 
+    files_block = await build_appended_files_block(
+        orch.paths, orch._config.append_system_prompt_files
+    )
+    if files_block:
+        append_prompt = f"{append_prompt}\n\n{files_block}" if append_prompt else files_block
+
     hook_ctx = HookContext(
         chat_id=key.chat_id,
         message_count=session.message_count,
@@ -142,6 +154,7 @@ async def _prepare_normal(
         append_system_prompt=append_prompt,
         model_override=req_model,
         provider_override=req_provider,
+        effort_override=req_effort,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
         transport=key.transport,
@@ -198,7 +211,7 @@ async def _reset_on_error(
     cli_detail: str = "",
 ) -> OrchestratorResult:
     """Kill processes, preserve session, return user-facing error."""
-    await orch._process_registry.kill_all(key.chat_id)
+    await orch._process_registry.kill_by_chat_topic(key.chat_id, key.topic_id)
     logger.warning("Session error preserved model=%s provider=%s", model_name, provider_name)
     return OrchestratorResult(
         text=session_error_text(model_name, cli_detail),
@@ -218,7 +231,7 @@ async def _handle_timeout(
     so that the next user message can ``--resume`` the timed-out session.
     """
     model_name, _provider_name = _request_target(orch, request)
-    await orch._process_registry.kill_all(key.chat_id)
+    await orch._process_registry.kill_by_chat_topic(key.chat_id, key.topic_id)
 
     # Persist the session_id captured from SystemInitEvent so resume works.
     if response.session_id and response.session_id != session.session_id:
@@ -382,8 +395,8 @@ async def _recover_session(
     logger.warning("recovery.%s chat=%s action=retry", ctx.reason, key.chat_id)
     model_name = ctx.model_override or orch._config.model
     provider_name = orch.models.provider_for(model_name)
-    await orch._process_registry.kill_all(key.chat_id)
-    orch._process_registry.clear_abort(key.chat_id)
+    await orch._process_registry.kill_by_chat_topic(key.chat_id, key.topic_id)
+    orch._process_registry.clear_topic_abort(key.chat_id, key.topic_id)
     await orch._sessions.reset_provider_session(key, provider=provider_name, model=model_name)
 
     cb = ctx.cbs
@@ -397,6 +410,7 @@ async def _recover_session(
         response = await orch._cli_service.execute_streaming(
             request,
             on_text_delta=cb.on_text_delta,
+            on_thinking_delta=cb.on_thinking_delta,
             on_tool_activity=cb.on_tool_activity,
             on_system_status=cb.on_system_status,
         )
@@ -461,7 +475,63 @@ async def _gemini_missing_config_key_warning(
     return OrchestratorResult(text=t("gemini.missing_key"))
 
 
-async def normal(  # noqa: PLR0911
+async def _finalize_turn(  # noqa: PLR0913
+    orch: Orchestrator,
+    key: SessionKey,
+    request: AgentRequest,
+    session: SessionData,
+    response: AgentResponse,
+    *,
+    flow_label: str,
+    schedule_memory_flush: bool = False,
+    session_recovered: bool = False,
+) -> OrchestratorResult:
+    """Shared post-execute tail of normal() and normal_streaming().
+
+    Handles abort/interrupt, timeout, and error short-circuits, then updates
+    the session and builds the final result. *schedule_memory_flush* is set by
+    the streaming flow only; *session_recovered* prepends the recovery notice
+    for the non-streaming flow (streaming already emitted it as a text delta).
+    """
+    _reg = orch._process_registry
+    if (
+        _reg.was_aborted(key.chat_id)
+        or _reg.was_aborted_topic(key.chat_id, key.topic_id)
+        or _reg.was_interrupted(key.chat_id)
+    ):
+        _reg.clear_interrupt(key.chat_id)
+        await _preserve_session_from_response(orch, session, response, reason="abort")
+        logger.info("%s flow aborted/interrupted by user", flow_label)
+        return OrchestratorResult(text="")
+    if response.timed_out:
+        return await _handle_timeout(orch, key, session, response, request)
+    if response.is_error:
+        if _is_sigkill(response):
+            logger.warning("recovery.sigkill chat=%s action=user-retry", key.chat_id)
+            return OrchestratorResult(text=_sigkill_user_msg(), stream_fallback=True)
+        model_name, provider_name = _request_target(orch, request)
+        await _preserve_session_from_response(orch, session, response, reason="error")
+        return await _reset_on_error(
+            orch,
+            key,
+            model_name=model_name,
+            provider_name=provider_name,
+            cli_detail=response.result,
+        )
+    await _update_session(orch, session, response)
+    if schedule_memory_flush:
+        _schedule_memory_flush(orch, key, session)
+    logger.info("%s flow completed", flow_label)
+    req_model, _prov = _request_target(orch, request)
+    result = _finish_normal(
+        response, session, orch._config.session_age_warning_hours, model_name=req_model
+    )
+    if session_recovered:
+        result.text = f"{_session_recovered_msg()}\n\n{result.text}"
+    return result
+
+
+async def normal(
     orch: Orchestrator,
     key: SessionKey,
     text: str,
@@ -485,47 +555,20 @@ async def normal(  # noqa: PLR0911
         )
         if outcome.failed_result is not None:
             return outcome.failed_result
-        request, session, response = outcome.request, outcome.session, outcome.response
-        session_recovered = outcome.session_recovered
-        _reg = orch._process_registry
-        if (
-            _reg.was_aborted(key.chat_id)
-            or _reg.was_aborted_topic(key.chat_id, key.topic_id)
-            or _reg.was_interrupted(key.chat_id)
-        ):
-            _reg.clear_interrupt(key.chat_id)
-            await _preserve_session_from_response(orch, session, response, reason="abort")
-            logger.info("Normal flow aborted/interrupted by user")
-            return OrchestratorResult(text="")
-        if response.timed_out:
-            return await _handle_timeout(orch, key, session, response, request)
-        if response.is_error:
-            if _is_sigkill(response):
-                logger.warning("recovery.sigkill chat=%s action=user-retry", key.chat_id)
-                return OrchestratorResult(text=_sigkill_user_msg(), stream_fallback=True)
-            model_name, provider_name = _request_target(orch, request)
-            await _preserve_session_from_response(orch, session, response, reason="error")
-            return await _reset_on_error(
-                orch,
-                key,
-                model_name=model_name,
-                provider_name=provider_name,
-                cli_detail=response.result,
-            )
-        await _update_session(orch, session, response)
-        logger.info("Normal flow completed")
-        req_model, _prov = _request_target(orch, request)
-        result = _finish_normal(
-            response, session, orch._config.session_age_warning_hours, model_name=req_model
+        return await _finalize_turn(
+            orch,
+            key,
+            outcome.request,
+            outcome.session,
+            outcome.response,
+            flow_label="Normal",
+            session_recovered=outcome.session_recovered,
         )
-        if session_recovered:
-            result.text = f"{_session_recovered_msg()}\n\n{result.text}"
-        return result
     finally:
         orch._inflight_tracker.complete(key.chat_id)
 
 
-async def normal_streaming(  # noqa: PLR0911
+async def normal_streaming(
     orch: Orchestrator,
     key: SessionKey,
     text: str,
@@ -552,6 +595,7 @@ async def normal_streaming(  # noqa: PLR0911
         response = await orch._cli_service.execute_streaming(
             request,
             on_text_delta=cb.on_text_delta,
+            on_thinking_delta=cb.on_thinking_delta,
             on_tool_activity=cb.on_tool_activity,
             on_system_status=cb.on_system_status,
             on_reasoning_delta=cb.on_reasoning_delta,
@@ -570,38 +614,14 @@ async def normal_streaming(  # noqa: PLR0911
         )
         if outcome.failed_result is not None:
             return outcome.failed_result
-        request, session, response = outcome.request, outcome.session, outcome.response
-        _reg = orch._process_registry
-        if (
-            _reg.was_aborted(key.chat_id)
-            or _reg.was_aborted_topic(key.chat_id, key.topic_id)
-            or _reg.was_interrupted(key.chat_id)
-        ):
-            _reg.clear_interrupt(key.chat_id)
-            await _preserve_session_from_response(orch, session, response, reason="abort")
-            logger.info("Streaming flow aborted/interrupted by user")
-            return OrchestratorResult(text="")
-        if response.timed_out:
-            return await _handle_timeout(orch, key, session, response, request)
-        if response.is_error:
-            if _is_sigkill(response):
-                logger.warning("recovery.sigkill chat=%s action=user-retry", key.chat_id)
-                return OrchestratorResult(text=_sigkill_user_msg(), stream_fallback=True)
-            model_name, provider_name = _request_target(orch, request)
-            await _preserve_session_from_response(orch, session, response, reason="error")
-            return await _reset_on_error(
-                orch,
-                key,
-                model_name=model_name,
-                provider_name=provider_name,
-                cli_detail=response.result,
-            )
-        await _update_session(orch, session, response)
-        _schedule_memory_flush(orch, key, session)
-        logger.info("Streaming flow completed")
-        req_model, _prov = _request_target(orch, request)
-        return _finish_normal(
-            response, session, orch._config.session_age_warning_hours, model_name=req_model
+        return await _finalize_turn(
+            orch,
+            key,
+            outcome.request,
+            outcome.session,
+            outcome.response,
+            flow_label="Streaming",
+            schedule_memory_flush=True,
         )
     finally:
         orch._inflight_tracker.complete(key.chat_id)
@@ -728,11 +748,22 @@ async def named_session_flow(
         return OrchestratorResult(text=t("session.still_running", name=session_name))
 
     tag = f"**[{session_name} | {ns.provider}]**\n"
-    orch._named_sessions.mark_running(key.chat_id, session_name, text)
+    orch._named_sessions.mark_running(
+        key.chat_id,
+        session_name,
+        text,
+        transport=key.transport,
+        topic_id=key.topic_id,
+    )
+    files_block = await build_appended_files_block(
+        orch.paths, orch._config.append_system_prompt_files
+    )
     request = AgentRequest(
         prompt=text,
+        append_system_prompt=files_block,
         model_override=ns.model,
         provider_override=ns.provider,
+        effort_override=ns.reasoning_effort or None,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
         transport=key.transport,
@@ -779,11 +810,22 @@ async def named_session_streaming(
 
     cb = cbs or StreamingCallbacks()
     tag = f"**[{session_name} | {ns.provider}]**\n"
-    orch._named_sessions.mark_running(key.chat_id, session_name, text)
+    orch._named_sessions.mark_running(
+        key.chat_id,
+        session_name,
+        text,
+        transport=key.transport,
+        topic_id=key.topic_id,
+    )
+    files_block = await build_appended_files_block(
+        orch.paths, orch._config.append_system_prompt_files
+    )
     request = AgentRequest(
         prompt=text,
+        append_system_prompt=files_block,
         model_override=ns.model,
         provider_override=ns.provider,
+        effort_override=ns.reasoning_effort or None,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
         transport=key.transport,
@@ -806,6 +848,7 @@ async def named_session_streaming(
     response = await orch._cli_service.execute_streaming(
         request,
         on_text_delta=_tagged_text_delta,
+        on_thinking_delta=cb.on_thinking_delta,
         on_tool_activity=cb.on_tool_activity,
         on_system_status=cb.on_system_status,
         on_reasoning_delta=cb.on_reasoning_delta,
@@ -887,6 +930,7 @@ async def heartbeat_flow(
         prompt=effective_prompt,
         model_override=req_model,
         provider_override=req_provider,
+        effort_override=session.reasoning_effort or None,
         chat_id=key.chat_id,
         topic_id=key.topic_id,
         transport=key.transport,

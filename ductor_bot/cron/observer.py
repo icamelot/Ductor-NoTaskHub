@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
+import signal
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from cronsim import CronSim, CronSimError
@@ -29,8 +33,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
+    """Kill a preflight including grandchildren (POSIX process group; plain kill elsewhere).
+
+    Safety invariant: killpg only ever runs for a verified pid > 1 and a
+    pgid > 1. killpg(0) would signal our own group, killpg(1) becomes
+    kill(-1) and terminates every process of this user — a mocked or
+    corrupted pid must never be able to reach the syscall.
+    """
+    pid = proc.pid
+    if sys.platform != "win32" and isinstance(pid, int) and pid > 1:
+        try:
+            pgid = os.getpgid(pid)
+        except (ProcessLookupError, PermissionError):
+            pgid = 0
+        if pgid > 1:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            else:
+                return
+    with contextlib.suppress(ProcessLookupError):
+        proc.kill()
+
+
 # Callback signature: (job_title, result_text, status, chat_id, topic_id, transport)
-CronResultCallback = Callable[[str, str, str, int, int | None, str], Awaitable[None]]
+# Returns (delivered, delivery_error) — the delivery acknowledgement (#160).
+CronResultCallback = Callable[[str, str, str, int, int | None, str], Awaitable[tuple[bool, str]]]
 
 
 @dataclass(slots=True)
@@ -67,6 +98,7 @@ class CronObserver(BaseTaskObserver):
         self._executing: set[str] = set()
         self._reschedule_lock = asyncio.Lock()
         self._requested_reschedule_task: asyncio.Task[None] | None = None
+        self._delivery_retry_task: asyncio.Task[None] | None = None
         self._running = False
         self._watcher = FileWatcher(
             paths.cron_jobs_path,
@@ -82,12 +114,19 @@ class CronObserver(BaseTaskObserver):
         self._running = True
         await self._schedule_all()
         await self._watcher.start()
+        if self._config.cron_delivery_retry.enabled:
+            self._delivery_retry_task = asyncio.create_task(self._delivery_retry_loop())
         logger.info("CronObserver started (%d jobs scheduled)", len(self._scheduled))
 
     async def stop(self) -> None:
         """Stop the observer: cancel all scheduled jobs and the watcher."""
         self._running = False
         await self._watcher.stop()
+        retry_task = self._delivery_retry_task
+        self._delivery_retry_task = None
+        if retry_task is not None:
+            retry_task.cancel()
+            await asyncio.gather(retry_task, return_exceptions=True)
         request_task = self._requested_reschedule_task
         self._requested_reschedule_task = None
         if request_task is not None:
@@ -309,19 +348,98 @@ class CronObserver(BaseTaskObserver):
         result_text: str,
         status: str,
         routing: tuple[int, int | None, str] = (0, None, "tg"),
-    ) -> None:
+    ) -> tuple[bool, str]:
         """Send result to the external handler (e.g. Telegram).
 
         Uses *job_title* (computed at execution start) so delivery works even
         if the job was removed from the manager mid-execution.
         *routing* is ``(chat_id, topic_id, transport)``; ``(0, None, "tg")``
         means broadcast.
+
+        Returns ``(delivered, delivery_error)`` (#160).
         """
-        if self._on_result:
+        if not self._on_result:
+            return False, "no result handler registered"
+        try:
+            return await self._on_result(job_title, result_text, status, *routing)
+        except Exception as exc:
+            logger.exception("Error in cron result handler for job %s", job_id)
+            return False, type(exc).__name__
+
+    async def _delivery_retry_loop(self) -> None:
+        """Periodically retry preserved delivery failures without rerunning the agent."""
+        interval = self._config.cron_delivery_retry.interval_seconds
+        while self._running:
+            await asyncio.sleep(interval)
             try:
-                await self._on_result(job_title, result_text, status, *routing)
+                await self._retry_failed_deliveries()
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                logger.exception("Error in cron result handler for job %s", job_id)
+                logger.exception("Cron delivery retry sweep failed")
+
+    def _delivery_retry_due(self, job: CronJob, now: datetime) -> bool:
+        """Whether *job* has a preserved failed delivery that is due for a retry."""
+        if job.id in self._executing:
+            # A regular execution is in flight; it may replace the preserved
+            # result at any moment — never race it with a retry delivery.
+            return False
+        if job.last_delivery_status != "failed" or not job.last_result_text:
+            return False
+        if job.delivery_retry_attempts >= self._config.cron_delivery_retry.max_attempts:
+            return False
+        if job.next_delivery_retry_at:
+            try:
+                if datetime.fromisoformat(job.next_delivery_retry_at) > now:
+                    return False
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Invalid next_delivery_retry_at for cron job %s; retrying now",
+                    job.id,
+                )
+        return True
+
+    async def _retry_failed_deliveries(self) -> None:
+        """Retry every due failed delivery once, preserving failures for later sweeps."""
+        retry_config = self._config.cron_delivery_retry
+        now = datetime.now(UTC)
+        changed = False
+        for job in self._manager.list_jobs():
+            if not self._delivery_retry_due(job, now):
+                continue
+
+            retried_text = job.last_result_text or ""
+            routing = (job.chat_id, job.topic_id, job.transport)
+            delivered, error = await self._deliver_result(
+                job.id,
+                job.title,
+                retried_text,
+                job.last_run_status or "success",
+                routing,
+            )
+            next_attempt = None
+            if not delivered:
+                next_attempt = (now + timedelta(seconds=retry_config.interval_seconds)).isoformat()
+            self._manager.update_delivery_retry(
+                job.id,
+                delivered=delivered,
+                delivery_error=error,
+                next_attempt_at=next_attempt,
+                expected_text=retried_text,
+            )
+            changed = True
+            if delivered:
+                logger.info("Cron delivery retry succeeded job=%s", job.title)
+            else:
+                logger.warning(
+                    "Cron delivery retry failed job=%s attempt=%d/%d error=%s",
+                    job.title,
+                    job.delivery_retry_attempts,
+                    retry_config.max_attempts,
+                    error,
+                )
+        if changed:
+            await self._watcher.update_mtime()
 
     async def _execute_job(
         self,
@@ -357,6 +475,15 @@ class CronObserver(BaseTaskObserver):
         logger.info("Cron job starting job=%s", job_title)
         t0 = time.monotonic()
 
+        if await self._run_preflight(job_title, task_folder):
+            self._manager.update_run_status(
+                job_id,
+                status="success:preflight",
+                delivery_status="skipped",
+            )
+            await self._watcher.update_mtime()
+            return
+
         overrides = TaskOverrides(
             provider=job.provider if job else None,
             model=job.model if job else None,
@@ -383,14 +510,19 @@ class CronObserver(BaseTaskObserver):
 
         if result.execution is None:
             logger.error("CLI not found for cron job %s", job_id)
-            await self._deliver_result(
+            delivered, delivery_error = await self._deliver_result(
                 job_id,
                 job_title,
                 result.result_text,
                 result.status,
                 routing,
             )
-            self._manager.update_run_status(job_id, status=result.status)
+            self._manager.update_run_status(
+                job_id,
+                status=result.status,
+                delivery_status="ok" if delivered else "failed",
+                delivery_error=delivery_error,
+            )
             return
 
         elapsed_ms = (time.monotonic() - t0) * 1000
@@ -410,20 +542,99 @@ class CronObserver(BaseTaskObserver):
         # the subsequent file I/O.
         if job and job.silent_on_success and result.status == "success":
             logger.info("Cron job %s succeeded silently (silent_on_success)", job_title)
+            delivery_status, delivery_error = "skipped", ""
+            delivered = True
         else:
-            await self._deliver_result(
+            delivered, delivery_error = await self._deliver_result(
                 job_id,
                 job_title,
                 result.result_text,
                 result.status,
                 routing,
             )
+            delivery_status = "ok" if delivered else "failed"
+            if not delivered:
+                logger.warning(
+                    "Cron job %s executed (%s) but delivery failed: %s — result preserved",
+                    job_title,
+                    result.status,
+                    delivery_error,
+                )
 
-        self._manager.update_run_status(job_id, status=result.status)
+        # #160: execution status and delivery status are tracked separately;
+        # on delivery failure the full result text is persisted for resend.
+        self._manager.update_run_status(
+            job_id,
+            status=result.status,
+            delivery_status=delivery_status,
+            delivery_error=delivery_error,
+            result_text=None if delivered else result.result_text,
+        )
         # Refresh our mtime baseline so the file-watcher doesn't treat the
         # run-status write as a user-initiated change and trigger a full
         # reschedule of all other jobs.
         await self._watcher.update_mtime()
+
+    async def _run_preflight(self, job_title: str, task_folder: str) -> bool:
+        """Return true when an enabled task-local preflight safely skips the agent."""
+        preflight = self._config.cron_preflight
+        if not preflight.enabled:
+            return False
+        folder = self._paths.cron_tasks_dir / task_folder
+        script = folder / "scripts" / "preflight.py"
+        if not script.is_file():
+            return False
+
+        env = os.environ.copy()
+        env["DUCTOR_HOME"] = str(self._paths.ductor_home)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                str(script),
+                cwd=str(folder),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=sys.platform != "win32",
+            )
+        except OSError:
+            # Fail open: a preflight that cannot even spawn (EMFILE, ENOMEM,
+            # permissions) must never suppress the scheduled agent run.
+            logger.warning("Cron preflight spawn failed job=%s; running agent", job_title)
+            return False
+        try:
+            async with asyncio.timeout(preflight.timeout_seconds):
+                stdout, stderr = await proc.communicate()
+        except TimeoutError:
+            _kill_process_group(proc)
+            try:
+                async with asyncio.timeout(5):
+                    await proc.communicate()
+            except TimeoutError:
+                # A grandchild kept the pipes open past SIGKILL; abandon the
+                # reap rather than hanging this job's coroutine forever.
+                logger.warning("Cron preflight unreapable after kill job=%s", job_title)
+            logger.warning("Cron preflight timed out job=%s", job_title)
+            return False
+
+        output = stdout.decode(errors="replace")
+        error = stderr.decode(errors="replace").strip()
+        last_line = next(
+            (line.strip() for line in reversed(output.splitlines()) if line.strip()),
+            "",
+        )
+        if proc.returncode == 0 and last_line == preflight.skip_marker:
+            logger.info("Cron preflight skipped agent job=%s task=%s", job_title, task_folder)
+            return True
+        if proc.returncode not in (0, 2) or error:
+            logger.warning(
+                "Cron preflight failed open job=%s returncode=%s stdout=%d stderr=%d",
+                job_title,
+                proc.returncode,
+                len(stdout),
+                len(stderr),
+            )
+        return False
 
     def _is_quiet_hours(self, job: CronJob | None, job_title: str) -> bool:
         """Return True when the job must be skipped due to quiet-hour settings."""

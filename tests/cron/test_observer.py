@@ -259,6 +259,182 @@ class TestCronObserverScheduling:
 class TestCronObserverExecution:
     """Job execution tests."""
 
+    async def test_preflight_skip_avoids_agent_execution(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("daily"))
+        scripts = paths.cron_tasks_dir / "daily" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "preflight.py").write_text("print('HEARTBEAT_OK')\n")
+        observer = _make_observer(paths, mgr, cron_preflight={"enabled": True})
+
+        preflight_proc = AsyncMock()
+        preflight_proc.returncode = 0
+        preflight_proc.communicate = AsyncMock(return_value=(b"checked\nHEARTBEAT_OK\n", b""))
+        with (
+            patch("asyncio.create_subprocess_exec", return_value=preflight_proc),
+            patch("ductor_bot.cron.observer.execute_in_task_folder") as execute,
+        ):
+            await observer._execute_job("daily", "Do work", "daily")
+
+        execute.assert_not_awaited()
+        job = mgr.get_job("daily")
+        assert job is not None
+        assert job.last_run_status == "success:preflight"
+        assert job.last_delivery_status == "skipped"
+
+    async def test_preflight_is_opt_in(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        scripts = paths.cron_tasks_dir / "daily" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "preflight.py").write_text("print('HEARTBEAT_OK')\n")
+        observer = _make_observer(paths, mgr)
+
+        with patch("asyncio.create_subprocess_exec") as spawn:
+            assert await observer._run_preflight("Daily Report", "daily") is False
+
+        spawn.assert_not_called()
+
+    async def test_preflight_non_skip_result_fails_open(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        scripts = paths.cron_tasks_dir / "daily" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "preflight.py").write_text("raise SystemExit(2)\n")
+        observer = _make_observer(paths, mgr, cron_preflight={"enabled": True})
+        preflight_proc = AsyncMock()
+        preflight_proc.returncode = 2
+        preflight_proc.communicate = AsyncMock(return_value=(b"CONTINUE\n", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=preflight_proc):
+            assert await observer._run_preflight("Daily Report", "daily") is False
+
+    async def test_preflight_end_to_end_real_script_skip(self, tmp_path: Path) -> None:
+        """Unmocked run: a real script printing the marker skips the agent."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        scripts = paths.cron_tasks_dir / "daily" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "preflight.py").write_text("print('checked')\nprint('HEARTBEAT_OK')\n")
+        observer = _make_observer(paths, mgr, cron_preflight={"enabled": True})
+
+        assert await observer._run_preflight("Daily Report", "daily") is True
+
+    async def test_preflight_end_to_end_real_script_fails_open(self, tmp_path: Path) -> None:
+        """Unmocked run: a real script exiting non-zero lets the agent run."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        scripts = paths.cron_tasks_dir / "daily" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "preflight.py").write_text("raise SystemExit(2)\n")
+        observer = _make_observer(paths, mgr, cron_preflight={"enabled": True})
+
+        assert await observer._run_preflight("Daily Report", "daily") is False
+
+    async def test_preflight_spawn_failure_fails_open(self, tmp_path: Path) -> None:
+        """A preflight that cannot even spawn must not suppress the agent run."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        scripts = paths.cron_tasks_dir / "daily" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "preflight.py").write_text("print('HEARTBEAT_OK')\n")
+        observer = _make_observer(paths, mgr, cron_preflight={"enabled": True})
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=OSError(24, "Too many open files"),
+        ):
+            assert await observer._run_preflight("Daily Report", "daily") is False
+
+    def test_kill_process_group_kills_group_for_real_pid(self) -> None:
+        from ductor_bot.cron.observer import _kill_process_group
+
+        proc = MagicMock()
+        proc.pid = 1234
+        with (
+            patch("ductor_bot.cron.observer.os.getpgid", return_value=1234) as getpgid,
+            patch("ductor_bot.cron.observer.os.killpg") as killpg,
+        ):
+            _kill_process_group(proc)
+
+        getpgid.assert_called_once_with(1234)
+        killpg.assert_called_once()
+        proc.kill.assert_not_called()
+
+    def test_kill_process_group_never_signals_pgid_one(self) -> None:
+        """pgid <= 1 would become kill(-1) and take down the whole user session."""
+        from ductor_bot.cron.observer import _kill_process_group
+
+        proc = MagicMock()
+        proc.pid = 1234
+        with (
+            patch("ductor_bot.cron.observer.os.getpgid", return_value=1),
+            patch("ductor_bot.cron.observer.os.killpg") as killpg,
+        ):
+            _kill_process_group(proc)
+
+        killpg.assert_not_called()
+        proc.kill.assert_called_once()
+
+    def test_kill_process_group_rejects_non_int_pid(self) -> None:
+        """A mocked/corrupted pid must never reach getpgid/killpg."""
+        from ductor_bot.cron.observer import _kill_process_group
+
+        proc = MagicMock()  # proc.pid is a MagicMock, not an int
+        with (
+            patch("ductor_bot.cron.observer.os.getpgid") as getpgid,
+            patch("ductor_bot.cron.observer.os.killpg") as killpg,
+        ):
+            _kill_process_group(proc)
+
+        getpgid.assert_not_called()
+        killpg.assert_not_called()
+        proc.kill.assert_called_once()
+
+    def test_kill_process_group_falls_back_when_group_gone(self) -> None:
+        from ductor_bot.cron.observer import _kill_process_group
+
+        proc = MagicMock()
+        proc.pid = 1234
+        with (
+            patch("ductor_bot.cron.observer.os.getpgid", side_effect=ProcessLookupError),
+            patch("ductor_bot.cron.observer.os.killpg") as killpg,
+        ):
+            _kill_process_group(proc)
+
+        killpg.assert_not_called()
+        proc.kill.assert_called_once()
+
+    async def test_preflight_timeout_kills_process_and_fails_open(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        scripts = paths.cron_tasks_dir / "daily" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "preflight.py").write_text("pass\n")
+        observer = _make_observer(
+            paths,
+            mgr,
+            cron_preflight={"enabled": True, "timeout_seconds": 0.01},
+        )
+        preflight_proc = AsyncMock()
+        preflight_proc.returncode = -9
+        calls = 0
+
+        async def communicate() -> tuple[bytes, bytes]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                await asyncio.sleep(999)
+            return b"", b""
+
+        preflight_proc.communicate = AsyncMock(side_effect=communicate)
+        preflight_proc.kill = MagicMock()
+        with patch("asyncio.create_subprocess_exec", return_value=preflight_proc):
+            assert await observer._run_preflight("Daily Report", "daily") is False
+
+        preflight_proc.kill.assert_called_once()
+
     async def test_handles_missing_task_folder(self, tmp_path: Path) -> None:
         paths = _make_paths(tmp_path)
         mgr = _make_manager(paths)
@@ -499,7 +675,7 @@ class TestCronObserverExecution:
         (paths.cron_tasks_dir / "daily").mkdir()
 
         observer = _make_observer(paths, mgr)
-        callback = AsyncMock()
+        callback = AsyncMock(return_value=(True, ""))
         observer.set_result_handler(callback)
 
         mock_proc = AsyncMock()
@@ -514,6 +690,199 @@ class TestCronObserverExecution:
             await observer._execute_job("daily", "Do work", "daily")
 
         callback.assert_awaited_once_with("My Daily Task", "All done.", "success", 0, None, "tg")
+        job = mgr.get_job("daily")
+        assert job is not None
+        assert job.last_run_status == "success"
+        assert job.last_delivery_status == "ok"
+        assert job.last_result_text is None
+
+    async def test_delivery_failure_recorded_and_result_preserved(self, tmp_path: Path) -> None:
+        """#160: execution success + delivery failure must be visible and resendable."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        mgr.add_job(_make_job("daily", title="My Daily Task"))
+        (paths.cron_tasks_dir / "daily").mkdir()
+
+        observer = _make_observer(paths, mgr)
+        callback = AsyncMock(return_value=(False, "TelegramNetworkError"))
+        observer.set_result_handler(callback)
+
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b'{"result": "All done."}', b""))
+
+        with (
+            time_machine.travel(datetime(2026, 1, 15, 14, 0, tzinfo=UTC)),
+            patch("ductor_bot.cron.execution.which", return_value="/usr/bin/claude"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            await observer._execute_job("daily", "Do work", "daily")
+
+        job = mgr.get_job("daily")
+        assert job is not None
+        assert job.last_run_status == "success"
+        assert job.last_delivery_status == "failed"
+        assert job.last_delivery_error == "TelegramNetworkError"
+        assert job.last_result_text == "All done."
+
+    async def test_retries_preserved_result_without_rerunning_agent(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        job = _make_job(
+            "daily",
+            title="My Daily Task",
+            last_run_status="success",
+            last_delivery_status="failed",
+            last_delivery_error="TelegramNetworkError",
+            last_result_text="Preserved result",
+            chat_id=42,
+            topic_id=7,
+        )
+        mgr.add_job(job)
+        observer = _make_observer(
+            paths,
+            mgr,
+            cron_delivery_retry={"enabled": True, "interval_seconds": 60},
+        )
+        callback = AsyncMock(return_value=(True, ""))
+        observer.set_result_handler(callback)
+
+        with patch("ductor_bot.cron.observer.execute_in_task_folder") as execute:
+            await observer._retry_failed_deliveries()
+
+        execute.assert_not_called()
+        callback.assert_awaited_once_with(
+            "My Daily Task", "Preserved result", "success", 42, 7, "tg"
+        )
+        assert job.last_delivery_status == "ok"
+        assert job.last_result_text is None
+        assert job.delivery_retry_attempts == 0
+
+    async def test_failed_retry_obeys_cooldown_and_attempt_limit(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        job = _make_job(
+            "daily",
+            last_run_status="success",
+            last_delivery_status="failed",
+            last_result_text="Preserved result",
+        )
+        mgr.add_job(job)
+        observer = _make_observer(
+            paths,
+            mgr,
+            cron_delivery_retry={
+                "enabled": True,
+                "interval_seconds": 60,
+                "max_attempts": 1,
+            },
+        )
+        callback = AsyncMock(return_value=(False, "still offline"))
+        observer.set_result_handler(callback)
+
+        await observer._retry_failed_deliveries()
+        await observer._retry_failed_deliveries()
+
+        callback.assert_awaited_once()
+        assert job.last_delivery_status == "failed"
+        assert job.last_result_text == "Preserved result"
+        assert job.delivery_retry_attempts == 1
+        assert job.next_delivery_retry_at is not None
+
+    async def test_failed_retry_cooldown_skips_before_next_attempt_time(
+        self, tmp_path: Path
+    ) -> None:
+        """With attempt budget left, the cooldown alone must gate the next retry."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        job = _make_job(
+            "daily",
+            last_run_status="success",
+            last_delivery_status="failed",
+            last_result_text="Preserved result",
+        )
+        mgr.add_job(job)
+        observer = _make_observer(
+            paths,
+            mgr,
+            cron_delivery_retry={
+                "enabled": True,
+                "interval_seconds": 300,
+                "max_attempts": 5,
+            },
+        )
+        callback = AsyncMock(return_value=(False, "still offline"))
+        observer.set_result_handler(callback)
+
+        await observer._retry_failed_deliveries()
+        await observer._retry_failed_deliveries()
+
+        callback.assert_awaited_once()
+        assert job.delivery_retry_attempts == 1
+        assert job.next_delivery_retry_at is not None
+
+    async def test_retry_sweep_skips_currently_executing_job(self, tmp_path: Path) -> None:
+        """A job whose regular execution is in flight is never retried concurrently."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        job = _make_job(
+            "daily",
+            last_run_status="success",
+            last_delivery_status="failed",
+            last_result_text="Preserved result",
+        )
+        mgr.add_job(job)
+        observer = _make_observer(
+            paths,
+            mgr,
+            cron_delivery_retry={
+                "enabled": True,
+                "interval_seconds": 60,
+                "max_attempts": 3,
+            },
+        )
+        callback = AsyncMock(return_value=(True, ""))
+        observer.set_result_handler(callback)
+        observer._executing.add(job.id)
+
+        await observer._retry_failed_deliveries()
+
+        callback.assert_not_awaited()
+        assert job.last_result_text == "Preserved result"
+
+    async def test_retry_success_keeps_newer_result_preserved(self, tmp_path: Path) -> None:
+        """A newer failed result that lands mid-retry is not cleared by the old ack."""
+        paths = _make_paths(tmp_path)
+        mgr = _make_manager(paths)
+        job = _make_job(
+            "daily",
+            last_run_status="success",
+            last_delivery_status="failed",
+            last_result_text="Old result",
+        )
+        mgr.add_job(job)
+        observer = _make_observer(
+            paths,
+            mgr,
+            cron_delivery_retry={
+                "enabled": True,
+                "interval_seconds": 60,
+                "max_attempts": 3,
+            },
+        )
+
+        async def _deliver_and_race(*_args: object, **_kwargs: object) -> tuple[bool, str]:
+            job.last_result_text = "New result"
+            job.delivery_retry_attempts = 0
+            return (True, "")
+
+        callback = AsyncMock(side_effect=_deliver_and_race)
+        observer.set_result_handler(callback)
+
+        await observer._retry_failed_deliveries()
+
+        assert job.last_result_text == "New result"
+        assert job.last_delivery_status == "failed"
 
     async def test_execute_job_timeout_kills_process(self, tmp_path: Path) -> None:
         """Subprocess that exceeds cli_timeout is killed and reported as timeout."""
@@ -615,7 +984,7 @@ class TestCronResultDelivery:
         (paths.cron_tasks_dir / "ephemeral").mkdir()
 
         observer = _make_observer(paths, mgr)
-        callback = AsyncMock()
+        callback = AsyncMock(return_value=(True, ""))
         observer.set_result_handler(callback)
 
         # Remove the job from the manager (simulates a reload that drops it)
@@ -654,12 +1023,13 @@ class TestCronResultDelivery:
 
         call_order: list[str] = []
 
-        async def track_result(*_args: object) -> None:
+        async def track_result(*_args: object) -> tuple[bool, str]:
             call_order.append("result_delivered")
+            return True, ""
 
         original_update = mgr.update_run_status
 
-        def track_update(job_id: str, *, status: str) -> None:
+        def track_update(job_id: str, *, status: str, **_kwargs: object) -> None:
             call_order.append("file_written")
             original_update(job_id, status=status)
 
@@ -687,7 +1057,7 @@ class TestCronResultDelivery:
         (paths.cron_tasks_dir / "broken").mkdir()
 
         observer = _make_observer(paths, mgr)
-        callback = AsyncMock()
+        callback = AsyncMock(return_value=(True, ""))
         observer.set_result_handler(callback)
 
         with (
@@ -712,7 +1082,7 @@ class TestCronResultDelivery:
         (paths.cron_tasks_dir / "reindex").mkdir()
 
         observer = _make_observer(paths, mgr)
-        callback = AsyncMock()
+        callback = AsyncMock(return_value=(True, ""))
         observer.set_result_handler(callback)
 
         mock_proc = AsyncMock()
@@ -739,7 +1109,7 @@ class TestCronResultDelivery:
         (paths.cron_tasks_dir / "reindex").mkdir()
 
         observer = _make_observer(paths, mgr)
-        callback = AsyncMock()
+        callback = AsyncMock(return_value=(True, ""))
         observer.set_result_handler(callback)
 
         mock_proc = AsyncMock()

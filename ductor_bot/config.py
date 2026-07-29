@@ -17,32 +17,8 @@ DEFAULT_EMPTY_GEMINI_API_KEY: str = "null"
 # Public exposure is gated by ``allow_public`` + a prominent warning at startup.
 _BIND_ALL_INTERFACES: str = ".".join(["0"] * 4)
 
-# Pre-build a safe UTC fallback.  On Windows without the ``tzdata`` package
-# (now a declared dependency), ``ZoneInfo("UTC")`` raises.  The fallback
-# is a minimal ``datetime.tzinfo`` subclass with a ``.key`` attribute so
-# callers that log ``tz.key`` keep working.
-try:
-    _SAFE_UTC: ZoneInfo = ZoneInfo("UTC")
-except (ZoneInfoNotFoundError, KeyError):
-    import datetime as _dt
-
-    class _UTCFallback(_dt.tzinfo):  # pragma: no cover
-        """Minimal UTC stand-in for systems without IANA timezone data."""
-
-        key: str = "UTC"
-        _ZERO = _dt.timedelta(0)
-
-        def utcoffset(self, dt: _dt.datetime | None) -> _dt.timedelta:
-            return self._ZERO
-
-        def tzname(self, dt: _dt.datetime | None) -> str:
-            return "UTC"
-
-        def dst(self, dt: _dt.datetime | None) -> _dt.timedelta:
-            return self._ZERO
-
-    _SAFE_UTC = _UTCFallback()  # type: ignore[assignment]
-    logger.warning("tzdata package missing — using built-in UTC fallback")
+# ``tzdata`` is a declared hard dependency, so ``ZoneInfo("UTC")`` cannot fail.
+_SAFE_UTC: ZoneInfo = ZoneInfo("UTC")
 
 
 class StreamingConfig(BaseModel):
@@ -127,6 +103,7 @@ class HeartbeatTarget(BaseModel):
     """
 
     enabled: bool = True
+    transport: str = "tg"
     chat_id: int | None = None
     topic_id: int | None = None
     prompt: str | None = None
@@ -230,6 +207,7 @@ class CLIParametersConfig(BaseModel):
     codex: list[str] = Field(default_factory=list)
     gemini: list[str] = Field(default_factory=list)
     antigravity: list[str] = Field(default_factory=list)
+    grok: list[str] = Field(default_factory=list)
 
 
 class MatrixConfig(BaseModel):
@@ -245,12 +223,39 @@ class MatrixConfig(BaseModel):
     store_path: str = "matrix_store"  # relative to ductor_home
 
 
+class SlackConfig(BaseModel):
+    """Slack Socket Mode settings."""
+
+    bot_token: str = ""
+    app_token: str = ""
+    allowed_channels: list[str] = Field(default_factory=list)
+    allowed_users: list[str] = Field(default_factory=list)
+
+
 class TasksConfig(BaseModel):
     """Settings for background task delegation."""
 
     enabled: bool = True
     max_parallel: int = 5
     timeout_seconds: float = 3600.0
+    finished_retention_hours: int = 168
+    finished_keep_last: int = 100
+
+
+class CronDeliveryRetryConfig(BaseModel):
+    """Retry delivery of preserved cron results without rerunning the agent."""
+
+    enabled: bool = False
+    interval_seconds: int = Field(default=300, ge=1)
+    max_attempts: int = Field(default=12, ge=1)
+
+
+class CronPreflightConfig(BaseModel):
+    """Task-local deterministic gate that can skip a cron agent run."""
+
+    enabled: bool = False
+    timeout_seconds: float = Field(default=15.0, gt=0)
+    skip_marker: str = "HEARTBEAT_OK"
 
 
 class TimeoutConfig(BaseModel):
@@ -381,14 +386,12 @@ def update_config_file(config_path: Path, **updates: object) -> None:
 
     data: dict[str, object] = json.loads(config_path.read_text(encoding="utf-8"))
     if all(data.get(key) == value for key, value in updates.items()):
-        logger.debug(
-            "Skipped config update with unchanged values: %s",
-            ", ".join(f"{k}={v}" for k, v in updates.items()),
-        )
+        logger.debug("Skipped config update with unchanged values: %s", ", ".join(updates))
         return
     data.update(updates)
     atomic_json_save(config_path, data)
-    logger.info("Persisted config update: %s", ", ".join(f"{k}={v}" for k, v in updates.items()))
+    # Keys only — values can carry secrets (api.token, gemini_api_key, ...).
+    logger.info("Persisted config update: %s", ", ".join(updates))
 
 
 async def update_config_file_async(config_path: Path, **updates: object) -> None:
@@ -404,6 +407,7 @@ class SkillSyncProviders(BaseModel):
     claude: bool = True
     codex: bool = True
     gemini: bool = True
+    grok: bool = True
 
 
 class SkillsConfig(BaseModel):
@@ -436,6 +440,9 @@ class AgentConfig(BaseModel):
     cli_timeout: float = 1800.0
     reasoning_effort: str = "medium"
     file_access: str = "all"
+    append_system_prompt_files: list[str] = Field(default_factory=list)
+    # Per-topic project roots: topic name | "<topic_id>" | "<chat_id>:<topic_id>" -> path
+    project_roots: dict[str, str] = Field(default_factory=dict)
     gemini_api_key: str | None = None
     streaming: StreamingConfig = Field(default_factory=StreamingConfig)
     docker: DockerConfig = Field(default_factory=DockerConfig)
@@ -450,6 +457,8 @@ class AgentConfig(BaseModel):
     image: ImageConfig = Field(default_factory=ImageConfig)
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
     tasks: TasksConfig = Field(default_factory=TasksConfig)
+    cron_delivery_retry: CronDeliveryRetryConfig = Field(default_factory=CronDeliveryRetryConfig)
+    cron_preflight: CronPreflightConfig = Field(default_factory=CronPreflightConfig)
     scene: SceneConfig = Field(default_factory=SceneConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
@@ -459,13 +468,14 @@ class AgentConfig(BaseModel):
     update_check: bool = True
     group_mention_only: bool = False
     interagent_port: int = 8799
-    transport: str = "telegram"  # "telegram" | "matrix"
+    transport: str = "telegram"  # "telegram" | "matrix" | "slack"
     transports: list[str] = Field(default_factory=list)
     telegram_token: str = ""
     allowed_user_ids: list[int] = Field(default_factory=list)
     allowed_group_ids: list[int] = Field(default_factory=list)
     allowed_channel_ids: list[int] = Field(default_factory=list)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
+    slack: SlackConfig = Field(default_factory=SlackConfig)
 
     @field_validator("gemini_api_key", mode="before")
     @classmethod
@@ -593,6 +603,14 @@ CLAUDE_MODELS_ORDERED: tuple[str, ...] = (
 )
 CLAUDE_MODELS: frozenset[str] = frozenset(CLAUDE_MODELS_ORDERED)
 
+# Reasoning-effort levels the Claude CLI accepts via ``--effort``. ``max`` is
+# Claude-specific (Codex tops out at ``xhigh``).
+CLAUDE_SUPPORTED_EFFORTS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+
+# Codex effort levels used to validate when the live Codex model cache is
+# unavailable, so ``max`` is rejected for Codex regardless of cache state.
+CODEX_SUPPORTED_EFFORTS_FALLBACK: tuple[str, ...] = ("low", "medium", "high", "xhigh")
+
 # "auto" is a Gemini-specific alias (Gemini CLI auto-selects the best model).
 _GEMINI_ALIASES: frozenset[str] = frozenset({"auto", "pro", "flash", "flash-lite"})
 
@@ -600,15 +618,34 @@ _GEMINI_ALIASES: frozenset[str] = frozenset({"auto", "pro", "flash", "flash-lite
 ANTIGRAVITY_MODELS_ORDERED: tuple[str, ...] = ("antigravity-default",)
 ANTIGRAVITY_MODELS: frozenset[str] = frozenset(ANTIGRAVITY_MODELS_ORDERED)
 
+# Grok Build models (xAI Grok CLI). Fallback when discovery is unavailable.
+GROK_MODELS_ORDERED: tuple[str, ...] = (
+    "grok-4.5",
+    "grok-composer-2.5-fast",
+)
+GROK_MODELS: frozenset[str] = frozenset(GROK_MODELS_ORDERED)
+# Canonical Grok headless levels (plus max alias of xhigh). See grok --help.
+GROK_SUPPORTED_EFFORTS: tuple[str, ...] = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
+
 _runtime_gemini: list[frozenset[str]] = [frozenset()]
 _runtime_antigravity: list[frozenset[str]] = [frozenset()]
+_runtime_grok: list[frozenset[str]] = [frozenset()]
+_runtime_grok_ordered: list[tuple[str, ...]] = [()]
 
 
 class ModelRegistry:
     """Provider resolution for models.
 
     Claude models (haiku, sonnet, opus) are hardcoded.
-    Gemini models are hardcoded (parsed from CLI at startup if available).
+    Gemini / Antigravity / Grok models refresh from CLI discovery when available.
     Codex models are discovered dynamically at runtime.
     """
 
@@ -634,6 +671,8 @@ class ModelRegistry:
             or model_id.startswith("antigravity-")
         ):
             return "antigravity"
+        if model_id in GROK_MODELS or model_id in _runtime_grok[0] or model_id.startswith("grok-"):
+            return "grok"
         return "codex"
 
 
@@ -675,3 +714,40 @@ def set_antigravity_models(models: frozenset[str]) -> None:
 def reset_antigravity_models() -> None:
     """Clear runtime Antigravity models. For test teardown only."""
     _runtime_antigravity[0] = frozenset()
+
+
+def get_grok_models() -> frozenset[str]:
+    """Return dynamically discovered Grok models (may be empty)."""
+    return _runtime_grok[0]
+
+
+def get_grok_models_ordered() -> tuple[str, ...]:
+    """Return Grok models in discovery order, or the hardcoded fallback list."""
+    ordered = _runtime_grok_ordered[0]
+    if ordered:
+        return ordered
+    return GROK_MODELS_ORDERED
+
+
+def set_grok_models(models: tuple[str, ...] | frozenset[str] | list[str]) -> None:
+    """Set runtime Grok models discovered from ``grok models``.
+
+    Refuses to overwrite with an empty set to prevent cache wipe.
+    Preserves discovery order when a sequence is provided.
+    """
+    if not models:
+        return
+    if isinstance(models, frozenset):
+        ordered = tuple(sorted(models))
+    else:
+        ordered = tuple(dict.fromkeys(models))  # dedupe, keep order
+    if not ordered:
+        return
+    _runtime_grok_ordered[0] = ordered
+    _runtime_grok[0] = frozenset(ordered)
+
+
+def reset_grok_models() -> None:
+    """Clear runtime Grok models. For test teardown only."""
+    _runtime_grok[0] = frozenset()
+    _runtime_grok_ordered[0] = ()

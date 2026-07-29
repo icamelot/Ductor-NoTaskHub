@@ -11,6 +11,7 @@ claude = "  Claude Code CLI   {status}"
 codex = "  OpenAI Codex CLI  {status}"
 gemini = "  Google Gemini CLI {status}"
 antigravity = "  Antigravity CLI   {status}"
+grok = "  xAI Grok CLI      {status}"
 no_auth = """\
 \n[bold red]Al menos una CLI debe estar instalada y autenticada.[/bold red]\n
   Claude: [dim]https://docs.anthropic.com/en/docs/claude-code[/dim]
@@ -20,6 +21,7 @@ claude_check_failed = "[yellow]Claude auth check raised: {error}. Skipping.[/yel
 codex_check_failed = "[yellow]Codex auth check raised: {error}. Skipping.[/yellow]"
 gemini_check_failed = "[yellow]Gemini auth check raised: {error}. Skipping.[/yellow]"
 antigravity_check_failed = "[yellow]Antigravity auth check raised: {error}. Skipping.[/yellow]"
+grok_check_failed = "[yellow]Grok auth check raised: {error}. Skipping.[/yellow]"
 
 [disclaimer]
 title = "[bold yellow]Aviso importante[/bold yellow]"
@@ -41,7 +43,8 @@ title = "[bold]Transporte de mensajería[/bold]"
 body = """\
 [bold]Elige cómo los usuarios hablarán con el bot:[/bold]\n
   [bold cyan]Telegram[/bold cyan]  — Requiere un token de bot de @BotFather
-  [bold cyan]Matrix[/bold cyan]    — Requiere una cuenta Matrix en un homeserver (p. ej. Element)"""
+  [bold cyan]Matrix[/bold cyan]    — Requiere una cuenta Matrix en un homeserver (p. ej. Element)
+  [bold cyan]Slack[/bold cyan]     — Requiere tokens de bot/app de Slack y el extra de Slack"""
 prompt = "Selecciona transporte:"
 
 [telegram.token]
@@ -104,6 +107,44 @@ body = """\
 [dim]Formato: @usuario:homeserver.dominio[/dim]"""
 prompt = "Tu ID de usuario de Matrix:"
 error = "[red]Formato inválido. Esperado: @user:dominio (p. ej. @nik:matrix.org)[/red]"
+
+[slack.bot_token]
+title = "[bold]Token del bot de Slack[/bold]"
+body = """\
+[bold]Introduce el token de bot de Slack.[/bold]\n
+  Copia el [bold cyan]Bot User OAuth Token[/bold cyan] de tu aplicación de Slack.\n
+[dim]Formato: xoxb-...[/dim]"""
+prompt = "Token del bot:"
+error = "[red]Token de bot inválido. Se espera un token que empiece por xoxb-[/red]"
+
+[slack.app_token]
+title = "[bold]Token de aplicación de Slack[/bold]"
+body = """\
+[bold]Introduce el token a nivel de aplicación de Slack.[/bold]\n
+  Activa Socket Mode en tu aplicación de Slack y crea un token de app con
+  el scope [bold cyan]connections:write[/bold cyan].\n
+[dim]Formato: xapp-...[/dim]"""
+prompt = "Token de la app:"
+error = "[red]Token de app inválido. Se espera un token que empiece por xapp-[/red]"
+
+[slack.allowed_channels]
+title = "[bold]Canales permitidos[/bold]"
+body = """\
+[bold]¿De qué canales de Slack debería aceptar mensajes el bot?[/bold]\n
+  Introduce uno o más IDs de canal separados por comas o espacios.\n
+  Déjalo en blanco para permitir cualquier canal al que se invite al bot.\n
+[dim]Ejemplos: C0123456789, G0123456789[/dim]"""
+prompt = "IDs de canal permitidos (opcional):"
+error = "[red]ID de canal de Slack inválido. Usa IDs C... o G... separados por comas/espacios.[/red]"
+
+[slack.allowed_users]
+title = "[bold]Usuarios permitidos[/bold]"
+body = """\
+[bold]¿Qué usuarios de Slack deberían poder hablar con el bot?[/bold]\n
+  Introduce uno o más IDs de usuario de Slack separados por comas o espacios.\n
+[dim]Ejemplo: U0123456789[/dim]"""
+prompt = "IDs de usuario permitidos:"
+error = "[red]ID de usuario de Slack inválido. Usa uno o más IDs U... separados por comas/espacios.[/red]"
 
 [docker]
 title = "[bold]Docker Sandboxing[/bold]"

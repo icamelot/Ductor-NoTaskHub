@@ -34,6 +34,13 @@ def _normalise_transport(value: str) -> str:
     return _TRANSPORT_ALIASES.get(stripped, stripped)
 
 
+def _parse_origin(data: dict[str, object]) -> tuple[int, int | None]:
+    """Extract the (chat_id, topic_id) origin fields from a request payload."""
+    chat_id = int(str(data["chat_id"])) if data.get("chat_id") else 0
+    topic_id = int(str(data["topic_id"])) if data.get("topic_id") else None
+    return chat_id, topic_id
+
+
 _DEFAULT_PORT = 8799
 _BIND_ALL_HOST = ".".join(["0"] * 4)
 
@@ -141,6 +148,7 @@ class InternalAgentAPI:
         recipient = data.get("to", "")
         message = data.get("message", "")
         new_session = bool(data.get("new_session", False))
+        chat_id, topic_id = _parse_origin(data)
 
         if not recipient or not message:
             return web.json_response(
@@ -154,6 +162,8 @@ class InternalAgentAPI:
             recipient=recipient,
             message=message,
             new_session=new_session,
+            chat_id=chat_id,
+            topic_id=topic_id,
         )
         return web.json_response(asdict(result))
 
@@ -176,8 +186,7 @@ class InternalAgentAPI:
         message = data.get("message", "")
         new_session = bool(data.get("new_session", False))
         summary = str(data.get("summary", ""))
-        chat_id = int(data["chat_id"]) if data.get("chat_id") else 0
-        topic_id = int(data["topic_id"]) if data.get("topic_id") else None
+        chat_id, topic_id = _parse_origin(data)
         transport = _normalise_transport(str(data.get("transport", "")))
         reply_to = str(data.get("reply_to", ""))  # #86
         silent = bool(data.get("silent", False))  # #86
@@ -421,6 +430,12 @@ class InternalAgentAPI:
                 )
 
         cancelled = await self._task_hub.cancel(task_id)
+        logger.info(
+            "Task cancel via API id=%s from=%s success=%s",
+            task_id,
+            sender or "?",
+            cancelled,
+        )
         return web.json_response({"success": cancelled})
 
     async def _handle_task_delete(  # noqa: PLR0911

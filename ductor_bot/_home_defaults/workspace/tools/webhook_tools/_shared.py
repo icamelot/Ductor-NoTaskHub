@@ -16,9 +16,6 @@ from ductor_bot._home_defaults.workspace.tools._tool_shared import (
     save_collection,
 )
 
-# Re-export so existing tool scripts keep working with ``from _shared import sanitize_name``
-sanitize_name = sanitize_name
-
 DUCTOR_HOME = Path(os.environ.get("DUCTOR_HOME", "~/.ductor")).expanduser()
 HOOKS_PATH = DUCTOR_HOME / "webhooks.json"
 CONFIG_PATH = DUCTOR_HOME / "config" / "config.json"
@@ -48,6 +45,41 @@ def available_hook_ids(hooks: list[dict[str, Any]]) -> list[str]:
 def find_hook(hooks: list[dict[str, Any]], hook_id: str) -> dict[str, Any] | None:
     """Find a hook dict by ID."""
     return find_by_id(hooks, hook_id)
+
+
+def reject_wake_overrides(
+    mode: str,
+    *,
+    provider: str | None,
+    model: str | None,
+    reasoning_effort: str | None,
+    cli_parameters: str | list[str] | None,
+) -> str | None:
+    """Return an error message when execution overrides are set on a wake hook.
+
+    Wake resumes the live session: provider/model/effort/cli_parameters cannot
+    apply there and were silently ignored before (#176). ``cron_task`` hooks
+    run a fresh one-shot session and keep full override support.
+    """
+    if mode != "wake":
+        return None
+    offending = [
+        flag
+        for flag, value in (
+            ("--provider", provider),
+            ("--model", model),
+            ("--reasoning-effort", reasoning_effort),
+            ("--cli-parameters", cli_parameters),
+        )
+        if value
+    ]
+    if not offending:
+        return None
+    return (
+        f"Execution overrides ({', '.join(offending)}) are not supported for mode 'wake' — "
+        "a wake resumes the live session with its current provider/model. "
+        "Use mode 'cron_task' for webhook-specific execution settings."
+    )
 
 
 def load_webhook_config() -> dict[str, Any]:

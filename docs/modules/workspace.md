@@ -95,14 +95,14 @@ Template variants:
 Variant selection:
 
 - `all-clis` when 2+ providers are authenticated
-- `codex-only` when only Codex
+- `codex-only` when only Codex (or only Grok — same `AGENTS.md` rules)
 - `gemini-only` when only Gemini
 - otherwise `claude-only`
 
 Deployment outputs per authenticated provider:
 
 - Claude -> `CLAUDE.md`
-- Codex -> `AGENTS.md`
+- Codex / Grok -> `AGENTS.md` (shared — like Codex, Grok loads project rules from `AGENTS.md`)
 - Gemini -> `GEMINI.md`
 
 Antigravity is a CLI provider, but workspace rule deployment has no dedicated
@@ -149,7 +149,7 @@ Duplicate prevention: injection is skipped when either marker already exists (`#
 ```text
 cron_tasks/<safe_name>/
   CLAUDE.md    # only if Claude authenticated
-  AGENTS.md    # only if Codex authenticated
+  AGENTS.md    # only if Codex and/or Grok authenticated
   GEMINI.md    # only if Gemini authenticated
   TASK_DESCRIPTION.md
   <safe_name>_MEMORY.md
@@ -170,6 +170,7 @@ Path traversal protection is enforced for create/delete operations.
 - `~/.claude/skills`
 - `~/.codex/skills`
 - `~/.gemini/skills`
+- `~/.grok/skills` (or `$GROK_HOME/skills`)
 
 Default mode uses symlinks/junctions. Docker mode uses managed directory copies (`.ductor_managed`) so paths resolve inside container namespace.
 

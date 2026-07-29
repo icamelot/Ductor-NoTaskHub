@@ -13,9 +13,15 @@ from ductor_bot.cli.base import (
     _IS_WINDOWS,
     BaseCLI,
     CLIConfig,
+    _cleanup_file,
+    add_cli_opt,
+    docker_prompt_tmp_dir,
     docker_wrap,
+    format_cli_cmd,
+    host_path_to_container,
 )
 from ductor_bot.cli.executor import SubprocessSpec, run_oneshot_subprocess, run_streaming_subprocess
+from ductor_bot.cli.gemini_utils import create_system_prompt_file
 from ductor_bot.cli.stream_events import (
     StreamEvent,
     parse_stream_line,
@@ -26,6 +32,13 @@ if TYPE_CHECKING:
     from ductor_bot.cli.timeout_controller import TimeoutController
 
 logger = logging.getLogger(__name__)
+
+# Claude passes ``--append-system-prompt`` as a single argv token.  Linux caps
+# one argument at ``MAX_ARG_STRLEN`` (128 KiB); a larger value makes
+# ``execve`` fail with ``OSError`` E2BIG.  Above this (byte) threshold the prompt
+# is written to a temp file and passed via ``--append-system-prompt-file``.
+_MAX_INLINE_APPEND_BYTES = 96 * 1024
+_APPEND_PREFIX = "ductor_append_"
 
 
 class ClaudeCodeCLI(BaseCLI):
@@ -53,16 +66,23 @@ class ClaudeCodeCLI(BaseCLI):
         prompt: str,
         resume_session: str | None = None,
         continue_session: bool = False,
+        *,
+        append_prompt_file: str | None = None,
     ) -> list[str]:
         cfg = self._config
         cmd = [self._cli, "-p", "--output-format", "json"]
 
-        _add_opt(cmd, "--permission-mode", cfg.permission_mode)
-        _add_opt(cmd, "--model", cfg.model)
-        _add_opt(cmd, "--system-prompt", cfg.system_prompt)
-        _add_opt(cmd, "--append-system-prompt", cfg.append_system_prompt)
-        _add_opt(cmd, "--max-turns", str(cfg.max_turns) if cfg.max_turns is not None else None)
-        _add_opt(
+        add_cli_opt(cmd, "--permission-mode", cfg.permission_mode)
+        add_cli_opt(cmd, "--model", cfg.model)
+        if cfg.reasoning_effort and cfg.reasoning_effort != "default":
+            cmd += ["--effort", cfg.reasoning_effort]
+        add_cli_opt(cmd, "--system-prompt", cfg.system_prompt)
+        if append_prompt_file:
+            cmd += ["--append-system-prompt-file", append_prompt_file]
+        else:
+            add_cli_opt(cmd, "--append-system-prompt", cfg.append_system_prompt)
+        add_cli_opt(cmd, "--max-turns", str(cfg.max_turns) if cfg.max_turns is not None else None)
+        add_cli_opt(
             cmd,
             "--max-budget-usd",
             str(cfg.max_budget_usd) if cfg.max_budget_usd is not None else None,
@@ -98,24 +118,37 @@ class ClaudeCodeCLI(BaseCLI):
         timeout_controller: TimeoutController | None = None,
     ) -> CLIResponse:
         """Send a prompt and return the final result."""
-        cmd = self._build_command(prompt, resume_session, continue_session)
-        exec_cmd, use_cwd = docker_wrap(cmd, self._config, interactive=_IS_WINDOWS)
-        _log_cmd(exec_cmd)
-        return await run_oneshot_subprocess(
-            config=self._config,
-            spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds, timeout_controller),
-            parse_output=_parse_response,
-            provider_label="CLI",
-        )
+        append_file = self._create_append_prompt_path()
+        try:
+            cmd = self._build_command(
+                prompt,
+                resume_session,
+                continue_session,
+                append_prompt_file=self._append_arg_path(append_file),
+            )
+            exec_cmd, use_cwd = docker_wrap(cmd, self._config, interactive=_IS_WINDOWS)
+            _log_cmd(exec_cmd)
+            return await run_oneshot_subprocess(
+                config=self._config,
+                spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds, timeout_controller),
+                parse_output=_parse_response,
+                provider_label="CLI",
+            )
+        finally:
+            await _cleanup_file(append_file)
 
     def _build_command_streaming(
         self,
         prompt: str,
         resume_session: str | None = None,
         continue_session: bool = False,
+        *,
+        append_prompt_file: str | None = None,
     ) -> list[str]:
         """Build CLI command with --output-format stream-json."""
-        cmd = self._build_command(prompt, resume_session, continue_session)
+        cmd = self._build_command(
+            prompt, resume_session, continue_session, append_prompt_file=append_prompt_file
+        )
         try:
             idx = cmd.index("json")
             cmd[idx] = "stream-json"
@@ -134,17 +167,55 @@ class ClaudeCodeCLI(BaseCLI):
         timeout_controller: TimeoutController | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Send a prompt and yield stream events as they arrive."""
-        cmd = self._build_command_streaming(prompt, resume_session, continue_session)
-        exec_cmd, use_cwd = docker_wrap(cmd, self._config, interactive=_IS_WINDOWS)
-        _log_cmd(exec_cmd, streaming=True)
+        append_file = self._create_append_prompt_path()
+        try:
+            cmd = self._build_command_streaming(
+                prompt,
+                resume_session,
+                continue_session,
+                append_prompt_file=self._append_arg_path(append_file),
+            )
+            exec_cmd, use_cwd = docker_wrap(cmd, self._config, interactive=_IS_WINDOWS)
+            _log_cmd(exec_cmd, streaming=True)
 
-        async for event in run_streaming_subprocess(
-            config=self._config,
-            spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds, timeout_controller),
-            line_handler=_claude_line_handler,
-            provider_label="CLI",
-        ):
-            yield event
+            async for event in run_streaming_subprocess(
+                config=self._config,
+                spec=SubprocessSpec(exec_cmd, use_cwd, prompt, timeout_seconds, timeout_controller),
+                line_handler=_claude_line_handler,
+                provider_label="CLI",
+            ):
+                yield event
+        finally:
+            await _cleanup_file(append_file)
+
+    def _create_append_prompt_path(self) -> str | None:
+        """Write an oversized ``--append-system-prompt`` to a temp file.
+
+        Returns the host path, or ``None`` when the prompt is empty or small
+        enough to pass inline.  A value above ``_MAX_INLINE_APPEND_BYTES`` would
+        exceed the kernel's per-argument limit and crash ``execve`` with
+        ``OSError`` E2BIG, so it is handed to the CLI via
+        ``--append-system-prompt-file`` instead.  The caller must clean up.
+        """
+        value = self._config.append_system_prompt
+        if not value or len(value.encode()) <= _MAX_INLINE_APPEND_BYTES:
+            return None
+        directory = docker_prompt_tmp_dir() if self._config.docker_container else None
+        return create_system_prompt_file(value, directory=directory, prefix=_APPEND_PREFIX)
+
+    def _append_arg_path(self, host_path: str | None) -> str | None:
+        """Resolve the ``--append-system-prompt-file`` value for the run target.
+
+        In Docker mode the temp file is read through the ``/ductor`` mount, so
+        the container-side path is passed to the CLI instead of the host path.
+        """
+        if host_path is None or not self._config.docker_container:
+            return host_path
+        container_path = host_path_to_container(host_path)
+        if container_path is None:
+            msg = f"append-system-prompt temp file is outside the Docker mount: {host_path}"
+            raise RuntimeError(msg)
+        return container_path
 
 
 async def _claude_line_handler(line: str) -> AsyncGenerator[StreamEvent, None]:
@@ -153,20 +224,10 @@ async def _claude_line_handler(line: str) -> AsyncGenerator[StreamEvent, None]:
         yield event
 
 
-def _add_opt(cmd: list[str], flag: str, value: str | None) -> None:
-    """Append a CLI flag+value pair if value is truthy."""
-    if value:
-        cmd += [flag, value]
-
-
 def _log_cmd(cmd: list[str], *, streaming: bool = False) -> None:
-    """Log the CLI command with truncated long values."""
-    safe_cmd = [
-        (c[:80] + "...") if len(c) > 80 and i > 0 and cmd[i - 1].startswith("--") else c
-        for i, c in enumerate(cmd)
-    ]
-    prefix = "CLI stream cmd" if streaming else "CLI cmd"
-    logger.info("%s: %s", prefix, " ".join(safe_cmd))
+    """Log the Claude CLI command with redacted, truncated long values."""
+    kind = "stream cmd" if streaming else "cmd"
+    logger.info("CLI %s: %s", kind, format_cli_cmd(cmd))
 
 
 def _parse_response(stdout: bytes, stderr: bytes, returncode: int | None) -> CLIResponse:

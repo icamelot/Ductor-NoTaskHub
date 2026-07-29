@@ -60,7 +60,9 @@ Per agent `_supervised_run` behavior:
 - exit code `42`:
   - main -> propagate full process/service restart
   - sub-agent -> in-process hot-reload
-- crash -> exponential backoff retries (5 attempts max), then mark `crashed`
+- crash:
+  - sub-agent -> exponential backoff retries (5s, 10s, 20s, 40s, 80s), give up after `_MAX_RESTART_RETRIES` (5) and mark `crashed` (main agent is notified)
+  - main agent -> **fatal** errors terminate the supervisor; **transient** network errors (`ConnectionError`, `TimeoutError`, `TelegramNetworkError`, `TelegramServerError`) retry **indefinitely** with capped backoff (5, 10, 20, 40, 60, 60, … s), so an early-startup network blip cannot take down the whole service. Fatal transport errors such as `TelegramUnauthorizedError` (bad token) and `TelegramConflictError` (double polling) still terminate.
 
 ## Sub-agent config (`agents.json`)
 
@@ -109,7 +111,7 @@ Shared across process:
 - sync: waits for target response (`send`)
 - async: returns task ID immediately (`send_async`)
 
-Recipient processing uses deterministic named session `ia-<sender>`.
+Recipient processing uses deterministic scoped session `ia.<sender-slug>.t<topic>.x<hash>`, or legacy `ia-<sender>` without source context.
 
 Async send metadata currently supports:
 
@@ -121,7 +123,7 @@ Async send metadata currently supports:
 
 Provider-switch safeguard:
 
-- if recipient provider changed since prior `ia-<sender>` session, old session is ended and recreated
+- if the recipient provider changed since the prior scoped or legacy inter-agent session, the old session is ended and recreated
 - provider-switch notice is surfaced back to sender side
 - when `reply_to` is set, async result handler lookup uses that agent name instead of `sender`
 - recipient notifications are skipped when `silent=true` or `reply_to` is set

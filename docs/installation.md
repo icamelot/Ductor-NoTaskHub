@@ -7,10 +7,14 @@
 3. At least one authenticated provider CLI:
    - Claude Code CLI: `npm install -g @anthropic-ai/claude-code && claude auth`
    - Codex CLI: `npm install -g @openai/codex && codex auth`
-   - Gemini CLI: `npm install -g @google/gemini-cli` and authenticate in `gemini`
+   - Gemini CLI: `npm install -g @google/gemini-cli` and authenticate in `gemini`.
+     Note: since 2026-06-18 Gemini CLI no longer serves requests for individual
+     Google accounts (free/Pro/Ultra) — it requires an API key or a Gemini Code
+     Assist license. For the free individual tier, use Antigravity (`agy`) instead.
 4. One of these messaging transports:
-   - **Telegram**: Bot token from [@BotFather](https://t.me/BotFather) + user ID from [@userinfobot](https://t.me/userinfobot)
-   - **Matrix**: install Matrix support first (`ductor install matrix` or `pip install \"ductor[matrix]\"`), then provide homeserver URL, user ID, and password/access token
+    - **Telegram**: Bot token from [@BotFather](https://t.me/BotFather) + user ID from [@userinfobot](https://t.me/userinfobot)
+    - **Matrix**: install Matrix support first (`ductor install matrix` or `pip install \"ductor[matrix]\"`), then provide homeserver URL, user ID, and password/access token
+    - **Slack**: install Slack support first (`pip install "ductor[slack]"`), then create a Slack app with Socket Mode, the bot/app scopes below, and provide bot/app tokens plus Slack member/channel IDs for the allowlist
 5. Docker optional (recommended for sandboxing)
 
 ## Install
@@ -45,18 +49,30 @@ ductor
 On first run, onboarding does:
 
 - checks Claude/Codex/Gemini/Antigravity auth status,
-- asks which transport to use (Telegram or Matrix),
+- asks which transport to use (Telegram, Matrix, or Slack),
 - collects transport credentials,
 - asks timezone,
 - offers Docker sandboxing (with optional AI/ML package selection),
 - offers service install,
 - writes config and seeds `~/.ductor/`.
 
-Multiple transports can run in parallel (e.g. Telegram + Matrix
+Multiple transports can run in parallel (e.g. Telegram + Slack
 simultaneously). After initial setup, configure the `transports` array
 in `config.json`. See [config.md](config.md) for details.
 
 If service install succeeds, onboarding returns without starting foreground bot.
+
+## Slack setup
+
+ductor's Slack transport uses **Slack Bolt + Socket Mode** — no public webhook URL is needed.
+
+```bash
+pip install "ductor[slack]"   # or: ductor install slack
+```
+
+You need a Slack app with Socket Mode, the required bot scopes and event subscriptions, plus a bot token (`xoxb-...`) and app-level token (`xapp-...`) for `slack.bot_token` / `slack.app_token`.
+
+Full step-by-step guide (app creation, scopes, events, config, troubleshooting): [`docs/slack-setup.md`](slack-setup.md)
 
 ## Platform notes
 

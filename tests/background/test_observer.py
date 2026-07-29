@@ -6,20 +6,35 @@ import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from ductor_bot.background.models import BackgroundResult, BackgroundSubmit
 from ductor_bot.background.observer import MAX_TASKS_PER_CHAT, BackgroundObserver
 from ductor_bot.cli.param_resolver import TaskExecutionConfig
+from ductor_bot.cli.types import AgentResponse
+from ductor_bot.config import AgentConfig
 from ductor_bot.cron.execution import OneShotExecutionResult
 from ductor_bot.infra.task_runner import TaskResult
 from ductor_bot.workspace.paths import DuctorPaths
 
 
-def _sub(chat_id: int = 123, prompt: str = "", message_id: int = 1) -> BackgroundSubmit:
-    return BackgroundSubmit(chat_id=chat_id, prompt=prompt, message_id=message_id, thread_id=None)
+def _sub(
+    chat_id: int = 123,
+    prompt: str = "",
+    message_id: int = 1,
+    *,
+    thread_id: int | None = None,
+    transport: str = "tg",
+) -> BackgroundSubmit:
+    return BackgroundSubmit(
+        chat_id=chat_id,
+        prompt=prompt,
+        message_id=message_id,
+        thread_id=thread_id,
+        transport=transport,
+    )
 
 
 def _make_paths(tmp_path: Path) -> DuctorPaths:
@@ -45,8 +60,10 @@ def _make_exec_config(**overrides: Any) -> TaskExecutionConfig:
     return TaskExecutionConfig(**defaults)
 
 
-def _make_observer(paths: DuctorPaths, timeout: float = 300.0) -> BackgroundObserver:
-    return BackgroundObserver(paths, timeout_seconds=timeout)
+def _make_observer(
+    paths: DuctorPaths, timeout: float = 300.0, config: AgentConfig | None = None
+) -> BackgroundObserver:
+    return BackgroundObserver(paths, timeout_seconds=timeout, config=config or AgentConfig())
 
 
 def _success_task_result(text: str = "") -> TaskResult:
@@ -159,6 +176,23 @@ class TestExecution:
         assert bg_result.chat_id == 123
         assert bg_result.message_id == 42
         assert bg_result.prompt_preview == "say hello"
+        assert bg_result.transport == "tg"
+
+    async def test_preserves_transport_and_thread_target(
+        self, observer: BackgroundObserver
+    ) -> None:
+        config = _make_exec_config()
+        handler = AsyncMock()
+        observer.set_result_handler(handler)
+
+        result = _success_task_result("Hello thread")
+        with patch("ductor_bot.background.observer.run_oneshot_task", return_value=result):
+            observer.submit(_sub(prompt="say hello", thread_id=77, transport="sl"), config)
+            await asyncio.sleep(0.05)
+
+        bg_result: BackgroundResult = handler.call_args[0][0]
+        assert bg_result.thread_id == 77
+        assert bg_result.transport == "sl"
 
     async def test_cli_not_found(self, observer: BackgroundObserver) -> None:
         config = _make_exec_config()
@@ -268,3 +302,45 @@ class TestCleanup:
             await asyncio.sleep(0.05)
 
         assert len(observer.active_tasks(123)) == 0
+
+
+class TestAppendSystemPromptFiles:
+    async def test_named_session_injects_configured_files(self, tmp_path: Path) -> None:
+        """_run_with_session injects append_system_prompt_files from the workspace."""
+        paths = _make_paths(tmp_path)
+        (paths.workspace / "PERSONA.md").write_text("Bg persona.")
+        config = AgentConfig(append_system_prompt_files=["PERSONA.md"])
+        cli = MagicMock()
+        cli.execute = AsyncMock(return_value=AgentResponse(result="ok", session_id="s1"))
+        obs = _make_observer(paths, config=config)
+        object.__setattr__(obs, "_cli_service", cli)
+        obs.set_result_handler(AsyncMock())
+
+        sub = BackgroundSubmit(
+            chat_id=1, prompt="hi", message_id=1, thread_id=None, session_name="work"
+        )
+        obs.submit(sub, _make_exec_config())
+        await asyncio.sleep(0.05)
+        await obs.shutdown()
+
+        request = cli.execute.await_args.args[0]
+        assert request.append_system_prompt is not None
+        assert "Bg persona." in request.append_system_prompt
+
+    async def test_named_session_no_files_leaves_append_none(self, tmp_path: Path) -> None:
+        paths = _make_paths(tmp_path)
+        cli = MagicMock()
+        cli.execute = AsyncMock(return_value=AgentResponse(result="ok", session_id="s1"))
+        obs = _make_observer(paths, config=AgentConfig())
+        object.__setattr__(obs, "_cli_service", cli)
+        obs.set_result_handler(AsyncMock())
+
+        sub = BackgroundSubmit(
+            chat_id=1, prompt="hi", message_id=1, thread_id=None, session_name="work"
+        )
+        obs.submit(sub, _make_exec_config())
+        await asyncio.sleep(0.05)
+        await obs.shutdown()
+
+        request = cli.execute.await_args.args[0]
+        assert request.append_system_prompt is None

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import secrets
-from collections.abc import Awaitable, Callable
 from typing import Protocol, runtime_checkable
 
 from ductor_bot.bus.envelope import DeliveryMode, Envelope, LockMode
@@ -69,8 +68,6 @@ class MessageBus:
         self._locks = lock_pool if lock_pool is not None else LockPool()
         self._transports: list[TransportAdapter] = []
         self._injector: SessionInjector | None = None
-        self._pre_deliver: Callable[[Envelope], Awaitable[None]] | None = None
-        self._audit: Callable[[Envelope], Awaitable[None]] | None = None
 
     @property
     def lock_pool(self) -> LockPool:
@@ -85,28 +82,10 @@ class MessageBus:
         """Set the session injector (typically the Orchestrator)."""
         self._injector = injector
 
-    def set_pre_deliver_hook(self, hook: Callable[[Envelope], Awaitable[None]]) -> None:
-        """Optional hook called after injection but before delivery.
-
-        Useful for transport-specific actions like typing indicators
-        or pre-delivery notifications.
-        """
-        self._pre_deliver = hook
-
-    def set_audit_hook(self, hook: Callable[[Envelope], Awaitable[None]]) -> None:
-        """Optional audit hook called for every submitted envelope."""
-        self._audit = hook
-
     async def submit(self, envelope: Envelope) -> None:
         """Route an envelope: assign ID, acquire lock, inject, deliver."""
         if not envelope.envelope_id:
             envelope.envelope_id = secrets.token_hex(6)
-
-        if self._audit:
-            try:
-                await self._audit(envelope)
-            except Exception:
-                logger.exception("Audit hook failed for envelope %s", envelope.envelope_id)
 
         logger.debug(
             "Bus submit: origin=%s chat=%d delivery=%s lock=%s inject=%s",
@@ -147,9 +126,6 @@ class MessageBus:
                 if not envelope.result_text:
                     envelope.result_text = f"Error processing {envelope.origin.value} result"
 
-        if self._pre_deliver:
-            await self._pre_deliver(envelope)
-
         await self._deliver(envelope)
 
     async def _deliver(self, envelope: Envelope) -> None:
@@ -160,6 +136,8 @@ class MessageBus:
                 envelope.origin.value,
                 envelope.chat_id,
             )
+            envelope.delivered = False
+            envelope.delivery_error = "no transports registered"
             return
 
         # BROADCAST goes to all transports unconditionally.
@@ -187,15 +165,19 @@ class MessageBus:
         for transport in matching:
             try:
                 await transport.deliver(envelope)
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Transport delivery failed: origin=%s transport=%s",
                     envelope.origin.value,
                     type(transport).__name__,
                 )
+                envelope.delivered = False
+                envelope.delivery_error = type(exc).__name__
 
         # Cascading fallback: target transport not registered at all.
         if not matching and others:
+            envelope.delivered = False
+            envelope.delivery_error = f"transport '{target_transport}' unavailable"
             logger.warning(
                 "Transport '%s' not available for envelope origin=%s, falling back to %s",
                 target_transport,

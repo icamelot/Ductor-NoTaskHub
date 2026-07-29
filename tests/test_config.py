@@ -39,6 +39,12 @@ def test_agent_config_defaults() -> None:
     assert cfg.gemini_api_key is None
     assert cfg.telegram_token == ""
     assert cfg.allowed_user_ids == []
+    assert cfg.cron_delivery_retry.enabled is False
+    assert cfg.cron_delivery_retry.interval_seconds == 300
+    assert cfg.cron_delivery_retry.max_attempts == 12
+    assert cfg.cron_preflight.enabled is False
+    assert cfg.cron_preflight.timeout_seconds == 15.0
+    assert cfg.cron_preflight.skip_marker == "HEARTBEAT_OK"
 
 
 def test_agent_config_normalizes_nullish_gemini_api_key() -> None:
@@ -196,6 +202,13 @@ def test_transport_matrix_backward_compat() -> None:
     assert cfg.transport == "matrix"
 
 
+def test_transport_slack_backward_compat() -> None:
+    """transport='slack' with empty transports normalizes correctly."""
+    cfg = AgentConfig(transport="slack")
+    assert cfg.transports == ["slack"]
+    assert cfg.transport == "slack"
+
+
 def test_transports_multi_sets_primary_transport() -> None:
     """Explicit multi-transport sets ``transport`` to first entry."""
     cfg = AgentConfig(transports=["telegram", "matrix"])
@@ -284,3 +297,20 @@ def test_memory_compaction_accepts_target_eq_trigger() -> None:
     cfg = MemoryCompactionConfig(trigger_lines=50, target_lines=50)
     assert cfg.target_lines == 50
     assert cfg.trigger_lines == 50
+
+
+def test_update_config_file_does_not_log_values(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Config values (api tokens, keys) must never reach the log (#175 follow-up)."""
+    from ductor_bot.config import update_config_file
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    with caplog.at_level("DEBUG", logger="ductor_bot.config"):
+        update_config_file(config_path, api={"token": "SUPERSECRET-TOKEN"})
+        update_config_file(config_path, api={"token": "SUPERSECRET-TOKEN"})  # unchanged path
+
+    assert "SUPERSECRET-TOKEN" not in caplog.text
+    assert "api" in caplog.text

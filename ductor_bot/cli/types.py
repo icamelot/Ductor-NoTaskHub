@@ -11,6 +11,21 @@ if TYPE_CHECKING:
     from ductor_bot.cli.timeout_controller import TimeoutController
 
 
+_TASK_LABEL_PREFIX = "task:"
+
+
+def task_id_from_label(process_label: str) -> str:
+    """Extract the task id from a ``task:<id>`` process label.
+
+    Background tasks are the only requests labelled with this prefix
+    (see ``TaskHub._run`` and ``ProcessRegistry.kill_for_task``).
+    Returns an empty string for non-task labels.
+    """
+    if process_label.startswith(_TASK_LABEL_PREFIX):
+        return process_label[len(_TASK_LABEL_PREFIX) :]
+    return ""
+
+
 class CLIResponse(BaseModel):
     """Response from a CLI call -- provider-agnostic."""
 
@@ -39,7 +54,18 @@ class CLIResponse(BaseModel):
 
     @property
     def total_tokens(self) -> int:
-        """Combined input + output tokens for context tracking."""
+        """Combined tokens for context tracking.
+
+        Prefer an explicit ``usage.total_tokens`` when providers publish one
+        (Grok headless does: uncached input + cache reads + output). Fall back
+        to input + output for Claude-style usage objects.
+        """
+        explicit = self.usage.get("total_tokens")
+        if explicit is not None:
+            try:
+                return int(explicit)
+            except (TypeError, ValueError):
+                pass
         return self.input_tokens + self.output_tokens
 
 
@@ -52,6 +78,7 @@ class AgentRequest:
     append_system_prompt: str | None = None
     model_override: str | None = None
     provider_override: str | None = None
+    effort_override: str | None = None
     chat_id: int = 0
     topic_id: int | None = None
     transport: str = "tg"

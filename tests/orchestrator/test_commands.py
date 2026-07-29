@@ -9,6 +9,7 @@ from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.orchestrator.commands import (
     cmd_cron,
     cmd_diagnose,
+    cmd_effort,
     cmd_memory,
     cmd_model,
     cmd_status,
@@ -35,12 +36,12 @@ async def test_model_list_returns_keyboard(orch: Orchestrator) -> None:
 
 async def test_model_direct_switch(orch: Orchestrator) -> None:
     kill_mock = AsyncMock(return_value=0)
-    object.__setattr__(orch._process_registry, "kill_all", kill_mock)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", kill_mock)
     result = await cmd_model(orch, SessionKey(chat_id=1), "/model sonnet")
     assert "opus" in result.text
     assert "sonnet" in result.text
     assert orch._config.model == "sonnet"
-    kill_mock.assert_called_once_with(1)
+    kill_mock.assert_called_once_with(1, None)
 
 
 async def test_model_already_set(orch: Orchestrator) -> None:
@@ -49,13 +50,13 @@ async def test_model_already_set(orch: Orchestrator) -> None:
 
 
 async def test_model_provider_change(orch: Orchestrator) -> None:
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     result = await cmd_model(orch, SessionKey(chat_id=1), "/model o3")
     assert "Provider:" in result.text
 
 
 async def test_model_switch_persists_to_config(orch: Orchestrator) -> None:
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     await cmd_model(orch, SessionKey(chat_id=1), "/model sonnet")
     saved = json.loads(orch.paths.config_path.read_text(encoding="utf-8"))
     assert saved["model"] == "sonnet"
@@ -63,7 +64,7 @@ async def test_model_switch_persists_to_config(orch: Orchestrator) -> None:
 
 
 async def test_model_provider_change_persists_to_config(orch: Orchestrator) -> None:
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     await cmd_model(orch, SessionKey(chat_id=1), "/model o3")
     saved = json.loads(orch.paths.config_path.read_text(encoding="utf-8"))
     assert saved["model"] == "o3"
@@ -72,11 +73,11 @@ async def test_model_provider_change_persists_to_config(orch: Orchestrator) -> N
 
 async def test_model_same_provider_does_not_show_reset(orch: Orchestrator) -> None:
     kill_mock = AsyncMock(return_value=0)
-    object.__setattr__(orch._process_registry, "kill_all", kill_mock)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", kill_mock)
     result = await cmd_model(orch, SessionKey(chat_id=1), "/model sonnet")
     assert "Session reset" not in result.text
     assert "Provider:" not in result.text
-    kill_mock.assert_called_once_with(1)
+    kill_mock.assert_called_once_with(1, None)
 
 
 # -- cmd_status --
@@ -228,9 +229,45 @@ async def test_diagnose_shows_effective_runtime_target(orch: Orchestrator) -> No
 
 async def test_model_unknown_name(orch: Orchestrator) -> None:
     """Unknown model names are treated as codex models and the switch succeeds."""
-    object.__setattr__(orch._process_registry, "kill_all", AsyncMock(return_value=0))
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
     result = await cmd_model(orch, SessionKey(chat_id=1), "/model totally_fake_model")
     assert "Model switched" in result.text
     assert "totally_fake_model" in result.text
     assert orch._config.model == "totally_fake_model"
     assert orch._config.provider == "codex"
+
+
+# -- /status effort line + /effort -----------------------------------------
+
+
+async def test_status_shows_effort_for_claude(orch: Orchestrator) -> None:
+    orch._config.reasoning_effort = "high"
+    with patch("ductor_bot.orchestrator.commands.check_all_auth", return_value={}):
+        result = await cmd_status(orch, SessionKey(chat_id=1), "/status")
+    assert "Effort: high" in result.text
+
+
+async def test_status_hides_effort_for_non_effort_provider(orch: Orchestrator) -> None:
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
+    from ductor_bot.orchestrator.selectors.model_selector import switch_model
+
+    await switch_model(orch, SessionKey(chat_id=1), "gemini-2.5-pro")
+    with patch("ductor_bot.orchestrator.commands.check_all_auth", return_value={}):
+        result = await cmd_status(orch, SessionKey(chat_id=1), "/status")
+    assert "Effort:" not in result.text
+
+
+async def test_cmd_effort_returns_selector(orch: Orchestrator) -> None:
+    result = await cmd_effort(orch, SessionKey(chat_id=1), "/effort")  # claude opus
+    assert result.buttons is not None
+    labels = [b.text for row in result.buttons.rows for b in row]
+    assert "Max" in labels
+
+
+async def test_cmd_effort_unsupported_provider_no_buttons(orch: Orchestrator) -> None:
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
+    from ductor_bot.orchestrator.selectors.model_selector import switch_model
+
+    await switch_model(orch, SessionKey(chat_id=1), "gemini-2.5-pro")
+    result = await cmd_effort(orch, SessionKey(chat_id=1), "/effort")
+    assert result.buttons is None

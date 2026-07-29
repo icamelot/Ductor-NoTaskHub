@@ -144,6 +144,8 @@ class TestNewSessionFlag:
                 "to": "target",
                 "message": "Hello",
                 "new_session": True,
+                "chat_id": 777,
+                "topic_id": 10,
             },
         )
         assert resp.status == 200
@@ -151,6 +153,8 @@ class TestNewSessionFlag:
             "sender",
             "Hello",
             new_session=True,
+            source_chat_id=777,
+            source_topic_id=10,
         )
 
     async def test_send_defaults_new_session_false(
@@ -245,6 +249,33 @@ class TestHandleHealth:
         assert data["agents"]["sub1"]["status"] == "crashed"
         assert data["agents"]["sub1"]["last_crash_error"] == "OOM"
         assert data["agents"]["sub1"]["restart_count"] == 1
+
+
+class TestHandleTaskCancel:
+    async def test_cancel_logs_sender(
+        self,
+        client: TestClient,
+        api: InternalAgentAPI,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        hub = MagicMock()
+        hub.cancel = AsyncMock(return_value=True)
+        hub.registry.get.return_value = MagicMock(parent_agent="main")
+        api.set_task_hub(hub)
+        caplog.set_level("INFO", logger="ductor_bot.multiagent.internal_api")
+
+        resp = await client.post(
+            "/tasks/cancel",
+            json={"task_id": "task-123", "from": "main"},
+        )
+
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["success"] is True
+        hub.cancel.assert_awaited_once_with("task-123")
+
+        messages = "\n".join(record.getMessage() for record in caplog.records)
+        assert "Task cancel via API id=task-123 from=main success=True" in messages
 
 
 class TestLifecycle:

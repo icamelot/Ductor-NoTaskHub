@@ -13,8 +13,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ductor_bot.cli._log_redact import redact_cmd_for_log
 from ductor_bot.cli.stream_events import StreamEvent
-from ductor_bot.cli.types import CLIResponse
+from ductor_bot.cli.types import CLIResponse, task_id_from_label
 
 if TYPE_CHECKING:
     from ductor_bot.cli.process_registry import ProcessRegistry
@@ -35,14 +36,9 @@ def _win_feed_stdin(process: asyncio.subprocess.Process, data: str) -> None:
 async def _feed_stdin_and_close(
     process: asyncio.subprocess.Process,
     data: str,
-    *,
-    windows_only: bool = False,
 ) -> None:
     """Write prompt to stdin and close the writer gracefully."""
-    if windows_only and not _IS_WINDOWS:
-        return
-
-    writer = process.stdin
+    writer = getattr(process, "stdin", None)
     if writer is None:
         return
 
@@ -68,6 +64,31 @@ async def _feed_stdin_and_close(
             await closed_result
 
 
+def add_cli_opt(cmd: list[str], flag: str, value: str | None) -> None:
+    """Append a ``flag value`` pair to *cmd* when *value* is truthy."""
+    if value:
+        cmd += [flag, value]
+
+
+def format_cli_cmd(cmd: list[str], *, redact: bool = True, opt_prefix: str | None = "--") -> str:
+    """Render *cmd* as a log-safe string: long values truncated, optionally redacted.
+
+    Args:
+        cmd: The command argv.
+        redact: Redact env-assignment values via :func:`redact_cmd_for_log`.
+        opt_prefix: Only truncate a long value when the preceding arg starts
+            with this prefix; ``None`` truncates every long value.
+    """
+    display = redact_cmd_for_log(cmd) if redact else cmd
+    safe = [
+        (c[:80] + "...")
+        if len(c) > 80 and (opt_prefix is None or (i > 0 and display[i - 1].startswith(opt_prefix)))
+        else c
+        for i, c in enumerate(display)
+    ]
+    return " ".join(safe)
+
+
 @dataclass(slots=True)
 class CLIConfig:
     """Configuration for any CLI wrapper."""
@@ -83,11 +104,12 @@ class CLIConfig:
     disallowed_tools: list[str] = field(default_factory=list)
     permission_mode: str = "bypassPermissions"
     docker_container: str = ""
+    # Reasoning effort: used by Codex (-c model_reasoning_effort) and Claude (--effort).
+    reasoning_effort: str = "medium"
     # Codex-specific fields (ignored by Claude provider):
     sandbox_mode: str = "read-only"
     images: list[str] = field(default_factory=list)
     instructions: str | None = None
-    reasoning_effort: str = "medium"
     # Process tracking (shared across providers):
     process_registry: ProcessRegistry | None = None
     chat_id: int = 0
@@ -145,6 +167,8 @@ def _docker_env_flags(
     ]
     if config.topic_id:
         env_flags += ["-e", f"DUCTOR_TOPIC_ID={config.topic_id}"]
+    if task_id := task_id_from_label(config.process_label):
+        env_flags += ["-e", f"DUCTOR_TASK_ID={task_id}"]
     if config.transcribe_command:
         env_flags += ["-e", f"DUCTOR_TRANSCRIBE_COMMAND={config.transcribe_command}"]
     if config.video_transcribe_command:
@@ -216,6 +240,42 @@ def docker_wrap(
             None,
         )
     return cmd, str(Path(config.working_dir).resolve())
+
+
+def host_path_to_container(host_path: str) -> str | None:
+    """Translate a host path under the ductor home to its container path.
+
+    The Docker container bind-mounts the ductor home at ``/ductor``.  Returns
+    ``None`` when *host_path* is not under the mounted home so callers can fail
+    loudly instead of passing a path the container cannot read.
+    """
+    from ductor_bot.workspace.paths import resolve_paths
+
+    prefix = str(resolve_paths().ductor_home)
+    if host_path.startswith(prefix):
+        return _CONTAINER_DUCTOR_MOUNT + host_path[len(prefix) :].replace("\\", "/")
+    return None
+
+
+def docker_prompt_tmp_dir() -> str:
+    """Return the bind-mounted tmp dir for prompt files, creating it if needed.
+
+    Prompt files handed to a containerized CLI must live under the ductor home
+    so they are readable through the ``/ductor`` mount.
+    """
+    from ductor_bot.workspace.paths import resolve_paths
+
+    tmp_dir = resolve_paths().ductor_home / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    return str(tmp_dir)
+
+
+async def _cleanup_file(path: str | None) -> None:
+    """Delete a temporary file from an async context (best effort)."""
+    if not path:
+        return
+    with contextlib.suppress(OSError):
+        await asyncio.to_thread(Path(path).unlink, missing_ok=True)
 
 
 class BaseCLI(ABC):

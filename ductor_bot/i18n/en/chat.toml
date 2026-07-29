@@ -108,6 +108,7 @@ header = "**Status**"
 no_session = "No active session."
 model_line = "Model: {model}"
 model_line_configured = "Model: {model} (configured: {configured})"
+effort_line = "Effort: {effort}"
 topic_line = "Topic: {topic}"
 session_line = "Session: `{sid}`"
 messages_line = "Messages: {count}"
@@ -219,7 +220,7 @@ model_line = "Model: {model}"
 model_change = "Model: {old} -> {new}"
 provider_change = "Provider: {old} -> {new}"
 reasoning_line = "Reasoning: {effort}"
-effort_updated = "Reasoning effort updated."
+effort_updated = "Reasoning effort set to {effort}."
 already_running = "Already running {model}. No changes made."
 
 resume_hint = """\
@@ -236,6 +237,7 @@ select_claude = "Select Claude model:"
 select_gemini = "Select Gemini model:"
 select_codex = "Select Codex model:"
 select_antigravity = "Select Antigravity model:"
+select_grok = "Select Grok Build model:"
 no_codex = "No Codex models available."
 no_gemini = "No Gemini models discovered from local Gemini CLI files."
 thinking_level = "Thinking level for {model}:"
@@ -307,6 +309,7 @@ header = "**ductor.dev**"
 version = "Version: `{version}`"
 telegram_description = "AI coding agents (Claude, Codex, Gemini) on Telegram.\nNamed sessions, persistent memory, cron jobs, webhooks, live streaming."
 matrix_description = "AI coding agents (Claude, Codex, Gemini) on Matrix.\nNamed sessions, persistent memory, cron jobs, webhooks, live streaming."
+slack_description = "AI coding agents (Claude, Codex, Gemini) on Slack.\nNamed sessions, persistent memory, cron jobs, webhooks, live streaming."
 
 # -- Help (categories) --------------------------------------------------------
 
@@ -319,6 +322,7 @@ cat_browse = "Browse & Info"
 cat_maintenance = "Maintenance"
 footer = "Send any message to start working with your agent."
 matrix_footer = "Use `!` or `/` prefix. Send any message to start."
+slack_footer = "Use `help` or `/help`. Send any other message to start."
 
 # -- Multi-agent ---------------------------------------------------------------
 
@@ -408,10 +412,13 @@ default_provider = "`/session <prompt>` — default provider"
 claude_single = "`/session <prompt>` — runs on Claude"
 claude_model = "`/session @opus <prompt>` — specific model"
 codex_single = "`/session <prompt>` — runs on Codex"
+grok_single = "`/session <prompt>` — runs on Grok Build"
 gemini_single = "`/session <prompt>` — runs on Gemini"
 gemini_model = "`/session @flash <prompt>` — specific model"
+grok_model = "`/session @grok-4.5 <prompt>` — specific model"
 claude_multi = "`/session @opus <prompt>` — Claude (opus)"
 codex_multi = "`/session @codex <prompt>` — Codex"
+grok_multi = "`/session @grok <prompt>` — Grok Build"
 gemini_multi = "`/session @flash <prompt>` — Gemini (flash)"
 explicit = "`/session @provider model <prompt>` — explicit"
 
@@ -451,3 +458,7 @@ changelog_header = "**Changelog v{version}**"
 
 [multiagent]
 async_task_received = "📥 **Async task received** from `{sender}`\nSession: `{session}` · Task ID: `{task_id}`\n\n_{preview}_"
+
+[effort]
+select = "Select reasoning effort for {model}:"
+unsupported = "Reasoning effort is not configurable for the `{provider}` provider."

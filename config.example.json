@@ -18,6 +18,9 @@
     "cli_timeout": 600.0,
     "reasoning_effort": "medium",
     "file_access": "all",
+    "append_system_prompt_files": [],
+    "_comment_project_roots": "Per-topic working dirs. Key: topic name, '<chat_id>:<topic_id>', or '<topic_id>'; value: directory path (~ expanded). Example: {\"my-project\": \"~/code/my-project\"}. Ignored in Docker mode and for named sessions.",
+    "project_roots": {},
     "gemini_api_key": "null",
     "transport": "telegram",
     "transports": ["telegram"],
@@ -34,6 +37,12 @@
         "allowed_rooms": ["!roomid1:matrix.org", "#your-room:matrix.org"],
         "allowed_users": ["@you:matrix.org"],
         "store_path": "matrix_store"
+    },
+    "slack": {
+        "bot_token": "xoxb-your-slack-bot-token",
+        "app_token": "xapp-your-slack-app-token",
+        "allowed_channels": ["C0123456789"],
+        "allowed_users": ["U0123456789"]
     },
     "streaming": {
         "enabled": true,
@@ -105,7 +114,8 @@
         "claude": ["--verbose", "--chrome"],
         "codex": [],
         "gemini": [],
-        "antigravity": []
+        "antigravity": [],
+        "grok": []
     },
     "image": {"max_dimension": 2000, "output_format": "webp", "quality": 85},
     "scene": {"seen_reaction": false, "status_reaction": true, "technical_footer": false},
@@ -123,6 +133,22 @@
         "activity_extension": 120.0,
         "max_extensions": 3
     },
-    "tasks": {"enabled": true, "max_parallel": 5, "timeout_seconds": 3600.0},
+    "tasks": {
+        "enabled": true,
+        "max_parallel": 5,
+        "timeout_seconds": 3600.0,
+        "finished_retention_hours": 168,
+        "finished_keep_last": 100
+    },
+    "cron_delivery_retry": {
+        "enabled": false,
+        "interval_seconds": 300,
+        "max_attempts": 12
+    },
+    "cron_preflight": {
+        "enabled": false,
+        "timeout_seconds": 15.0,
+        "skip_marker": "HEARTBEAT_OK"
+    },
     "interagent_port": 8799
 }

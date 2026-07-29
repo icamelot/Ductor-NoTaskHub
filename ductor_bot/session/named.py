@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
 import secrets
 import time
 from dataclasses import asdict, dataclass
@@ -11,8 +13,26 @@ from pathlib import Path
 from typing import Any
 
 from ductor_bot.infra.json_store import atomic_json_save, load_json
+from ductor_bot.session.key import SessionKey
 
 logger = logging.getLogger(__name__)
+
+
+def interagent_session_name(
+    sender: str,
+    source_chat_id: int = 0,
+    source_topic_id: int | None = None,
+) -> str:
+    """Return the legacy or chat/topic-scoped inter-agent session name."""
+    if not source_chat_id:
+        return f"ia-{sender}"
+    slug = re.sub(r"[^a-z0-9]+", "-", sender.lower()).strip("-")[:12] or "agent"
+    topic = f"t{source_topic_id}" if source_topic_id is not None else "t0"
+    digest = hashlib.sha256(f"{sender}\0{source_chat_id}\0{source_topic_id}".encode()).hexdigest()[
+        :8
+    ]
+    return f"{f'ia.{slug}.{topic}'[:30]}.x{digest}"
+
 
 _ADJECTIVES: tuple[str, ...] = (
     "bold",
@@ -108,6 +128,8 @@ _NOUNS: tuple[str, ...] = (
 )
 
 MAX_SESSIONS_PER_CHAT = 10
+# ponytail: flat per-chat cap for inter-agent sessions; per-sender quotas if it ever matters
+MAX_INTERAGENT_SESSIONS_PER_CHAT = 32
 
 _MAX_NAME_ATTEMPTS = 50
 
@@ -143,6 +165,8 @@ class NamedSession:
     message_count: int = 0
     last_prompt: str = ""
     transport: str = "tg"
+    reasoning_effort: str = ""
+    topic_id: int | None = None
 
 
 def _session_from_dict(data: dict[str, Any]) -> NamedSession:
@@ -150,6 +174,7 @@ def _session_from_dict(data: dict[str, Any]) -> NamedSession:
     return NamedSession(
         name=str(data.get("name", "")),
         chat_id=int(data.get("chat_id", 0)),
+        topic_id=int(data["topic_id"]) if data.get("topic_id") is not None else None,
         provider=str(data.get("provider", "")),
         model=str(data.get("model", "")),
         session_id=str(data.get("session_id", "")),
@@ -159,6 +184,7 @@ def _session_from_dict(data: dict[str, Any]) -> NamedSession:
         message_count=int(data.get("message_count", 0)),
         last_prompt=str(data.get("last_prompt", data.get("prompt_preview", ""))),
         transport=str(data.get("transport", "tg")),
+        reasoning_effort=str(data.get("reasoning_effort", "")),
     )
 
 
@@ -192,6 +218,7 @@ class NamedSessionRegistry:
                 self._recovered_running[(ns.chat_id, ns.name)] = NamedSession(
                     name=ns.name,
                     chat_id=ns.chat_id,
+                    topic_id=ns.topic_id,
                     provider=ns.provider,
                     model=ns.model,
                     session_id=ns.session_id,
@@ -200,6 +227,8 @@ class NamedSessionRegistry:
                     created_at=ns.created_at,
                     message_count=ns.message_count,
                     last_prompt=ns.last_prompt,
+                    transport=ns.transport,
+                    reasoning_effort=ns.reasoning_effort,
                 )
                 ns.status = "idle"
             self._sessions[(ns.chat_id, ns.name)] = ns
@@ -210,12 +239,14 @@ class NamedSessionRegistry:
         entries = [asdict(ns) for ns in self._sessions.values() if ns.status != "ended"]
         atomic_json_save(self._path, {"sessions": entries})
 
-    def create(
+    def create(  # noqa: PLR0913  -- session identity + provider/model/effort are all intrinsic
         self,
         chat_id: int,
         provider: str,
         model: str,
         prompt_preview: str,
+        reasoning_effort: str = "",
+        key: SessionKey | None = None,
     ) -> NamedSession:
         """Create a new named session. Raises ValueError if limit exceeded."""
         active = self.active_names(chat_id)
@@ -224,15 +255,19 @@ class NamedSessionRegistry:
             raise ValueError(msg)
 
         name = generate_name(active)
+        session_key = key or SessionKey.telegram(chat_id)
         session = NamedSession(
             name=name,
-            chat_id=chat_id,
+            chat_id=session_key.chat_id,
             provider=provider,
             model=model,
             session_id="",
             prompt_preview=prompt_preview[:60],
             status="running",
             created_at=time.time(),
+            reasoning_effort=reasoning_effort,
+            transport=session_key.transport,
+            topic_id=session_key.topic_id,
         )
         self._sessions[(chat_id, name)] = session
         self._persist()
@@ -300,31 +335,73 @@ class NamedSessionRegistry:
 
         Use this when the caller needs full control over the session name
         and fields (e.g. inter-agent sessions with deterministic names).
+        Inter-agent sessions bypass the ``create()`` quota, so they get their
+        own cap here: scoped names grow with every distinct (sender, chat,
+        topic) origin and are never ended, which would otherwise leak memory
+        and rewrite an ever-growing JSON on every add.
         """
+        if session.name.startswith(("ia-", "ia.")):
+            self._evict_oldest_interagent(session.chat_id)
         self._sessions[(session.chat_id, session.name)] = session
         self._persist()
 
-    def mark_running(self, chat_id: int, name: str, prompt: str) -> None:
+    def _evict_oldest_interagent(self, chat_id: int) -> None:
+        """Drop oldest non-running inter-agent sessions above the per-chat cap."""
+        idle = sorted(
+            (
+                s
+                for s in self._sessions.values()
+                if s.chat_id == chat_id
+                and s.name.startswith(("ia-", "ia."))
+                and s.status != "running"
+            ),
+            key=lambda s: s.created_at,
+        )
+        overflow = len(idle) - (MAX_INTERAGENT_SESSIONS_PER_CHAT - 1)
+        if overflow <= 0:
+            return
+        for victim in idle[:overflow]:
+            del self._sessions[(victim.chat_id, victim.name)]
+            logger.info("Evicted idle inter-agent session %s (cap)", victim.name)
+
+    def mark_running(
+        self,
+        chat_id: int,
+        name: str,
+        prompt: str,
+        *,
+        transport: str | None = None,
+        topic_id: int | None = None,
+    ) -> None:
         """Mark a session as running and store the prompt for recovery."""
         ns = self._sessions.get((chat_id, name))
         if ns is None:
             return
         ns.status = "running"
         ns.last_prompt = prompt[:4000]
+        if transport:
+            ns.transport = transport
+        if topic_id is not None:
+            ns.topic_id = topic_id
         self._persist()
 
-    def pop_recovered_running(self, chat_id: int | None = None) -> list[NamedSession]:
+    def pop_recovered_running(
+        self, chat_id: int | None = None, *, transport: str | None = None
+    ) -> list[NamedSession]:
         """Return sessions that were running at last shutdown, then clear them.
 
         If *chat_id* is given, only return sessions for that chat.
-        Excludes inter-agent sessions (``ia-`` prefix).
+        If *transport* is given, only return sessions for that transport.
+        Excludes inter-agent sessions (``ia-`` or ``ia.`` prefix).
         """
         results: list[NamedSession] = []
         to_remove: list[tuple[int, str]] = []
         for key, ns in self._recovered_running.items():
             if chat_id is not None and ns.chat_id != chat_id:
                 continue
-            if ns.name.startswith("ia-"):
+            if transport is not None and ns.transport != transport:
+                continue
+            if ns.name.startswith(("ia-", "ia.")):
                 continue
             results.append(ns)
             to_remove.append(key)
@@ -333,7 +410,17 @@ class NamedSessionRegistry:
         return sorted(results, key=lambda s: s.created_at)
 
     def active_names(self, chat_id: int) -> set[str]:
-        """Return the set of active session names for collision checks."""
+        """Return active user session names for the quota and name generation.
+
+        Inter-agent sessions (``ia-``/``ia.`` namespace) are excluded: they are
+        capped separately in :meth:`add` and must never consume the user's
+        ``/session`` quota. Generated animal names cannot collide with the
+        ``ia`` namespace, so excluding them here is collision-safe.
+        """
         return {
-            s.name for s in self._sessions.values() if s.chat_id == chat_id and s.status != "ended"
+            s.name
+            for s in self._sessions.values()
+            if s.chat_id == chat_id
+            and s.status != "ended"
+            and not s.name.startswith(("ia-", "ia."))
         }

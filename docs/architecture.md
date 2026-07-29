@@ -96,7 +96,7 @@ Matrix startup follows a similar pattern (orchestrator creation, bus wiring, obs
 3. inject runtime environment note into workspace rule files
 4. instantiate `Orchestrator`
 5. check provider auth and apply provider availability
-6. initialize model cache observers (Gemini + Antigravity + Codex)
+6. initialize model cache observers (Gemini + Antigravity + Grok + Codex), only for provider CLIs found by startup auth detection
 7. initialize task observers (`BackgroundObserver`, `CronObserver`, `WebhookObserver`)
 8. start observers (`cron`, `heartbeat`, `webhook`, `cleanup`) + rule/skill watchers
 9. optional API server startup
@@ -285,5 +285,5 @@ Rule sync:
 - sub-agents are full stacks with own transport credentials/workspace/session files (each sub-agent can use a different transport)
 - all stacks share one event loop, inter-agent bus, and optional shared task hub
 - async inter-agent results are injected via bus envelopes
-- provider switch during `ia-<sender>` conversations auto-resets that named session and surfaces a provider-switch notice
+- provider switch during scoped `ia.<sender-slug>.t<topic>.x<hash>` conversations (legacy `ia-<sender>` without source context) auto-resets that named session and surfaces a provider-switch notice
 - async agent-tool pipelines can route replies explicitly via `reply_to` and suppress recipient noise via `silent`

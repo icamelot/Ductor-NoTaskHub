@@ -7,11 +7,20 @@ from ductor_bot.i18n import t
 SEP = "\u2500\u2500\u2500"
 
 _SHELL_TOOLS = frozenset({"bash", "powershell", "cmd", "sh", "zsh", "shell"})
+_TOOL_LABELS = {
+    "toolsearch": "Search",
+    "searchtool": "Search",
+    "webfetch": "Web fetch",
+    "websearch": "Web search",
+}
 
 
 def normalize_tool_name(name: str) -> str:
     """Normalize shell-related tool names to 'Shell' for display."""
-    return "Shell" if name.lower() in _SHELL_TOOLS else name
+    lower = name.lower()
+    if lower in _SHELL_TOOLS:
+        return "Shell"
+    return _TOOL_LABELS.get(lower, name)
 
 
 def fmt(*blocks: str) -> str:
@@ -81,6 +90,7 @@ def new_session_text(provider: str) -> str:
         "codex": "Codex",
         "gemini": "Gemini",
         "antigravity": "Antigravity",
+        "grok": "Grok Build",
     }.get(provider.lower(), provider)
     return fmt(
         t("session.reset_header"),
@@ -93,33 +103,6 @@ def stop_text(killed: bool, provider: str) -> str:
     """Build the /stop response."""
     body = t("stop.killed", provider=provider) if killed else t("stop.nothing")
     return fmt(t("stop.header"), SEP, body)
-
-
-# -- Timeout messages --
-
-
-def timeout_warning_text(remaining: float) -> str:
-    """Warning text shown when a timeout is approaching."""
-    if remaining >= 60:
-        mins = int(remaining // 60)
-        return t("timeout.warning_minutes", mins=mins)
-    secs = int(remaining)
-    return t("timeout.warning_seconds", secs=secs)
-
-
-def timeout_extended_text(extension: float, remaining_ext: int) -> str:
-    """Notification that the timeout was extended due to activity."""
-    secs = int(extension)
-    return t("timeout.extended", secs=secs, remaining=remaining_ext)
-
-
-def timeout_result_text(elapsed: float, configured: float) -> str:
-    """Error text when a CLI process hit its timeout."""
-    return fmt(
-        t("timeout.result_header"),
-        SEP,
-        t("timeout.result_body", elapsed=int(elapsed), configured=int(configured)),
-    )
 
 
 # -- Startup lifecycle messages --

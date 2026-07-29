@@ -52,25 +52,13 @@ _HOT_RELOADABLE: frozenset[str] = frozenset(
         "heartbeat",
         "cleanup",
         "cli_parameters",
+        "project_roots",
         "allowed_user_ids",
         "allowed_group_ids",
         "group_mention_only",
         "scene",
         "image",
         "language",
-    }
-)
-
-# Fields that require a full restart to take effect.
-_RESTART_REQUIRED: frozenset[str] = frozenset(
-    {
-        "telegram_token",
-        "docker",
-        "api",
-        "webhooks",
-        "ductor_home",
-        "log_level",
-        "gemini_api_key",
     }
 )
 
@@ -94,6 +82,9 @@ def classify_changes(
 ) -> tuple[dict[str, Any], list[str]]:
     """Split changes into hot-reloadable values and restart-required field names.
 
+    Any field not in ``_HOT_RELOADABLE`` requires a restart — this fails safe
+    for new/unknown config fields.
+
     Returns ``(hot_values, restart_fields)`` where ``hot_values`` maps field
     names to their new values and ``restart_fields`` lists fields that need
     a restart.
@@ -103,8 +94,6 @@ def classify_changes(
     for field, (_old, new_val) in changes.items():
         if field in _HOT_RELOADABLE:
             hot[field] = new_val
-        elif field in _RESTART_REQUIRED:
-            restart.append(field)
         else:
             restart.append(field)
     return hot, restart

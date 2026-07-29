@@ -27,6 +27,8 @@ def from_background_result(result: BackgroundResult) -> Envelope:
     return Envelope(
         origin=Origin.BACKGROUND,
         chat_id=result.chat_id,
+        topic_id=result.thread_id,
+        transport=result.transport,
         prompt_preview=result.prompt_preview,
         result_text=result.result_text,
         status=result.status,
@@ -333,26 +335,4 @@ def from_task_question(
         lock_mode=LockMode.REQUIRED,
         needs_injection=True,
         metadata={"task_id": task_id},
-    )
-
-
-# -- User / API messages (audit only) -----------------------------------------
-
-
-def from_user_message(
-    chat_id: int,
-    text: str,
-    *,
-    topic_id: int | None = None,
-    source: Origin = Origin.USER,
-) -> Envelope:
-    """Create an envelope for a user/API message (audit tracking only)."""
-    return Envelope(
-        origin=source,
-        chat_id=chat_id,
-        topic_id=topic_id,
-        prompt=text,
-        prompt_preview=text[:80] if text else "",
-        delivery=DeliveryMode.UNICAST,
-        lock_mode=LockMode.NONE,
     )

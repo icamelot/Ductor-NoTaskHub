@@ -107,6 +107,7 @@ header = "**Estado**"
 no_session = "No hay sesión activa."
 model_line = "Modelo: {model}"
 model_line_configured = "Modelo: {model} (configurado: {configured})"
+effort_line = "Esfuerzo: {effort}"
 topic_line = "Tema: {topic}"
 session_line = "Sesión: `{sid}`"
 messages_line = "Mensajes: {count}"
@@ -218,7 +219,7 @@ model_line = "Modelo: {model}"
 model_change = "Modelo: {old} -> {new}"
 provider_change = "Proveedor: {old} -> {new}"
 reasoning_line = "Razonamiento: {effort}"
-effort_updated = "Nivel de razonamiento actualizado."
+effort_updated = "Nivel de razonamiento establecido en {effort}."
 already_running = "Ya está ejecutando {model}. Sin cambios."
 
 resume_hint = """\
@@ -235,6 +236,7 @@ select_claude = "Selecciona modelo de Claude:"
 select_gemini = "Selecciona modelo de Gemini:"
 select_codex = "Selecciona modelo de Codex:"
 select_antigravity = "Selecciona modelo de Antigravity:"
+select_grok = "Selecciona modelo de Grok Build:"
 no_codex = "No hay modelos de Codex disponibles."
 no_gemini = "No se encontraron modelos de Gemini en los archivos locales de la CLI."
 thinking_level = "Nivel de razonamiento para {model}:"
@@ -306,6 +308,7 @@ header = "**ductor.dev**"
 version = "Versión: `{version}`"
 telegram_description = "Agentes de código IA (Claude, Codex, Gemini) en Telegram.\nSesiones con nombre, memoria persistente, tareas cron, webhooks, streaming en vivo."
 matrix_description = "Agentes de código IA (Claude, Codex, Gemini) en Matrix.\nSesiones con nombre, memoria persistente, tareas cron, webhooks, streaming en vivo."
+slack_description = "Agentes de código IA (Claude, Codex, Gemini) en Slack.\nSesiones con nombre, memoria persistente, tareas cron, webhooks, streaming en vivo."
 
 # -- Ayuda (categorías) -------------------------------------------------------
 
@@ -318,6 +321,7 @@ cat_browse = "Archivos e info"
 cat_maintenance = "Mantenimiento"
 footer = "Envía cualquier mensaje para empezar a trabajar con tu agente."
 matrix_footer = "Usa el prefijo `!` o `/`. Envía cualquier mensaje para empezar."
+slack_footer = "Usa comandos como `help` o `/help`. Envía cualquier otro mensaje para empezar."
 
 # -- Multi-agente --------------------------------------------------------------
 
@@ -407,10 +411,13 @@ default_provider = "`/session <prompt>` — proveedor por defecto"
 claude_single = "`/session <prompt>` — se ejecuta en Claude"
 claude_model = "`/session @opus <prompt>` — modelo específico"
 codex_single = "`/session <prompt>` — se ejecuta en Codex"
+grok_single = "`/session <prompt>` — se ejecuta en Grok Build"
 gemini_single = "`/session <prompt>` — se ejecuta en Gemini"
 gemini_model = "`/session @flash <prompt>` — modelo específico"
+grok_model = "`/session @grok-4.5 <prompt>` — modelo específico"
 claude_multi = "`/session @opus <prompt>` — Claude (opus)"
 codex_multi = "`/session @codex <prompt>` — Codex"
+grok_multi = "`/session @grok <prompt>` — Grok Build"
 gemini_multi = "`/session @flash <prompt>` — Gemini (flash)"
 explicit = "`/session @provider model <prompt>` — explícito"
 
@@ -450,3 +457,7 @@ changelog_header = "**Changelog v{version}**"
 
 [multiagent]
 async_task_received = "📥 **Tarea asíncrona recibida** de `{sender}`\nSesión: `{session}` · ID de tarea: `{task_id}`\n\n_{preview}_"
+
+[effort]
+select = "Selecciona el esfuerzo de razonamiento para {model}:"
+unsupported = "El esfuerzo de razonamiento no es configurable para el proveedor `{provider}`."
