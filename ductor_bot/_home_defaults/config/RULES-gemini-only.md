@@ -121,15 +121,12 @@ Parameters are inserted before the `--` separator in commands.
 ### Timeouts
 
 - `timeouts.normal`: max seconds for a normal CLI call (default `600`)
-- `timeouts.background`: max seconds for background tasks (default `1800`)
+- `timeouts.background`: max seconds for named background sessions (default `1800`)
 - `timeouts.subagent`: max seconds for sub-agent tasks (default `3600`)
 - `timeouts.extend_on_activity`: auto-extend timeout when tool activity detected
 
 ### Tasks
 
-- `tasks.enabled`: `true`/`false` — enable background task system
-- `tasks.max_parallel`: max concurrent background tasks (default `5`)
-- `tasks.timeout_seconds`: default timeout per task
 
 ### Access Control
 

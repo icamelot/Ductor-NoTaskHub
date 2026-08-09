@@ -4,13 +4,24 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from unittest.mock import patch
 
+import pytest
+
+from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.workspace.init import init_workspace, inject_runtime_environment
 from ductor_bot.workspace.paths import DuctorPaths
 
-if TYPE_CHECKING:
-    import pytest
+
+@pytest.fixture(autouse=True)
+def _all_clis_authenticated() -> object:
+    """Keep workspace rule-file assertions independent of host CLI auth."""
+    auth = {
+        provider: AuthResult(provider=provider, status=AuthStatus.AUTHENTICATED)
+        for provider in ("claude", "codex", "gemini")
+    }
+    with patch("ductor_bot.cli.auth.check_all_auth", return_value=auth):
+        yield
 
 
 def _setup_home_defaults(fw_root: Path) -> None:
@@ -103,6 +114,14 @@ def test_creates_tools_dir(tmp_path: Path) -> None:
     paths = _make_paths(tmp_path)
     init_workspace(paths)
     assert paths.tools_dir.is_dir()
+
+
+def test_fresh_init_does_not_create_legacy_background_directories(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    init_workspace(paths)
+
+    assert not (paths.workspace / "tasks").exists()
+    assert not (paths.tools_dir / "task_tools").exists()
 
 
 # -- Zone 2: framework files always overwritten --
@@ -357,6 +376,122 @@ def test_config_merge_preserves_user_values(tmp_path: Path) -> None:
     config = json.loads(paths.config_path.read_text())
     assert config["provider"] == "codex"
     assert config["model"] == "sonnet"
+
+
+def test_config_merge_removes_legacy_tasks_and_preserves_unknown_key(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    paths.config_dir.mkdir(parents=True)
+    paths.config_path.write_text(
+        json.dumps({"tasks": {"enabled": True}, "future_key": {"value": 7}})
+    )
+
+    init_workspace(paths)
+
+    saved = json.loads(paths.config_path.read_text())
+    assert "tasks" not in saved
+    assert saved["future_key"] == {"value": 7}
+
+
+def test_config_merge_does_not_overwrite_invalid_json(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    paths.config_dir.mkdir(parents=True)
+    invalid = '{"tasks": '
+    paths.config_path.write_text(invalid)
+
+    init_workspace(paths)
+
+    assert paths.config_path.read_text() == invalid
+
+
+def test_workspace_init_preserves_legacy_tasks_data(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    legacy = paths.workspace / "tasks"
+    legacy.mkdir(parents=True)
+    removed_name_parts = ("TASK", "MEMORY.md")
+    data = legacy / "".join(removed_name_parts)
+    data.write_text("user task data")
+
+    init_workspace(paths)
+
+    assert data.read_text() == "user task data"
+
+
+def test_workspace_init_removes_known_task_tools_but_preserves_unknown_file(
+    tmp_path: Path,
+) -> None:
+    paths = _make_paths(tmp_path)
+    legacy = paths.workspace / "tools" / "task_tools"
+    legacy.mkdir(parents=True)
+    (legacy / "create_task.py").write_text("legacy framework tool")
+    unknown = legacy / "my_notes.txt"
+    unknown.write_text("keep me")
+
+    init_workspace(paths)
+
+    assert not (legacy / "create_task.py").exists()
+    assert unknown.read_text() == "keep me"
+
+
+def test_workspace_init_removes_empty_legacy_task_tools_directory(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    legacy = paths.workspace / "tools" / "task_tools"
+    legacy.mkdir(parents=True)
+    (legacy / "RULES.md").write_text("legacy framework rules")
+
+    init_workspace(paths)
+
+    assert not legacy.exists()
+
+
+def test_workspace_init_warns_and_continues_when_legacy_tool_cannot_be_removed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    paths = _make_paths(tmp_path)
+    legacy = paths.workspace / "tools" / "task_tools"
+    legacy.mkdir(parents=True)
+    blocked = legacy / "create_task.py"
+    blocked.write_text("legacy framework tool")
+    original_unlink = Path.unlink
+
+    def guarded_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if path == blocked:
+            raise PermissionError("blocked for test")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", guarded_unlink)
+
+    with caplog.at_level("WARNING", logger="ductor_bot.workspace.init"):
+        init_workspace(paths)
+
+    assert blocked.exists()
+    assert "Failed to remove legacy background-task tool" in caplog.text
+
+
+def test_workspace_init_warns_and_continues_when_legacy_directory_cannot_be_removed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    paths = _make_paths(tmp_path)
+    legacy = paths.workspace / "tools" / "task_tools"
+    legacy.mkdir(parents=True)
+    (legacy / "RULES.md").write_text("legacy framework rules")
+    original_rmdir = Path.rmdir
+
+    def guarded_rmdir(path: Path) -> None:
+        if path == legacy:
+            raise PermissionError("blocked for test")
+        original_rmdir(path)
+
+    monkeypatch.setattr(Path, "rmdir", guarded_rmdir)
+
+    with caplog.at_level("WARNING", logger="ductor_bot.workspace.init"):
+        init_workspace(paths)
+
+    assert legacy.exists()
+    assert "Failed to remove legacy background-task tool directory" in caplog.text
 
 
 # -- idempotency --

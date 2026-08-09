@@ -21,7 +21,6 @@ Important runtime paths:
 - `sessions_path`: `~/.ductor/sessions.json`
 - `named_sessions_path`: `~/.ductor/named_sessions.json`
 - `env_file`: `~/.ductor/.env`
-- `tasks_registry_path`: `~/.ductor/tasks.json`
 - `chat_activity_path`: `~/.ductor/chat_activity.json`
 - `startup_state_path`: `~/.ductor/startup_state.json`
 - `inflight_turns_path`: `~/.ductor/inflight_turns.json`
@@ -29,30 +28,27 @@ Important runtime paths:
 - `webhooks_path`: `~/.ductor/webhooks.json`
 - `logs_dir`: `~/.ductor/logs`
 - `cron_tasks_dir`: `~/.ductor/workspace/cron_tasks`
-- `tasks_dir`: `~/.ductor/workspace/tasks`
 - `api_files_dir`: `~/.ductor/workspace/api_files`
 - `skills_dir`: `~/.ductor/workspace/skills`
 - `bundled_skills_dir`: package `_home_defaults/workspace/skills`
 
 ## `init_workspace()` order
 
-1. migrate legacy `workspace/tasks -> workspace/cron_tasks`
-2. `sync_bundled_skills(paths)`
-3. `_sync_home_defaults(paths)`
-4. ensure required directories
-5. `RulesSelector(paths).deploy_rules()`
-6. `ensure_task_rule_files(paths.cron_tasks_dir)`
-7. `sync_rule_files(paths.workspace)`
-8. `_smart_merge_config(paths)`
-9. `_clean_orphan_symlinks(paths)`
-10. `sync_skills(paths)`
+1. `sync_bundled_skills(paths)`
+2. `_sync_home_defaults(paths)`
+3. ensure required directories
+4. `RulesSelector(paths).deploy_rules()`
+5. `ensure_task_rule_files(paths.cron_tasks_dir)`
+6. `sync_rule_files(paths.workspace)`
+7. `_smart_merge_config(paths)`
+8. `_clean_orphan_symlinks(paths)`
+9. `sync_skills(paths)`
 
 Idempotent by design (called from multiple startup paths).
 
 Directory creation note:
 
 - `workspace/api_files/` is not in `_REQUIRED_DIRS`; it is created lazily on first API upload via `prepare_destination(...)`.
-- `workspace/tasks/` is part of `_REQUIRED_DIRS` and always created (used by shared `TaskHub` task folders).
 - sub-agent homes do not create `logs/` by default; all agents write to the main home log file `~/.ductor/logs/agent.log`.
 
 ## Zone copy rules (`_walk_and_copy`)
@@ -64,7 +60,6 @@ Directory creation note:
   - `workspace/tools/cron_tools/`
   - `workspace/tools/webhook_tools/`
   - `workspace/tools/agent_tools/`
-  - `workspace/tools/task_tools/`
 
 Special case:
 

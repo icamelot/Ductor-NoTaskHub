@@ -29,7 +29,6 @@ _ZONE2_PY_DIRS = frozenset(
         "workspace/tools/cron_tools",
         "workspace/tools/webhook_tools",
         "workspace/tools/agent_tools",
-        "workspace/tools/task_tools",
         # media_tools scripts consume framework env-vars
         # (DUCTOR_TRANSCRIBE_COMMAND, DUCTOR_VIDEO_TRANSCRIBE_COMMAND) — keep
         # them framework-managed so v0.16.0 users inherit the configurable
@@ -277,9 +276,11 @@ def _smart_merge_config(paths: DuctorPaths) -> None:
     except (json.JSONDecodeError, OSError):
         logger.warning("Failed to parse config: %s, skipping merge", paths.config_path)
         return
+    had_legacy_tasks = "tasks" in existing
+    existing.pop("tasks", None)
     merged = {**defaults, **existing}
 
-    if merged != existing:
+    if had_legacy_tasks or merged != existing:
         from ductor_bot.infra.json_store import atomic_json_save
 
         atomic_json_save(paths.config_path, merged)
@@ -290,12 +291,43 @@ def _smart_merge_config(paths: DuctorPaths) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _migrate_tasks_to_cron_tasks(paths: DuctorPaths) -> None:
-    """One-time migration: rename tasks/ to cron_tasks/ if needed."""
-    old_tasks = paths.workspace / "tasks"
-    if old_tasks.is_dir() and not paths.cron_tasks_dir.exists():
-        old_tasks.rename(paths.cron_tasks_dir)
-        logger.info("Migrated workspace/tasks/ -> workspace/cron_tasks/")
+_LEGACY_TASK_TOOL_FILES = frozenset(
+    {
+        "RULES.md",
+        "_shared.py",
+        "ask_parent.py",
+        "cancel_task.py",
+        "create_task.py",
+        "delete_task.py",
+        "list_tasks.py",
+        "resume_task.py",
+    }
+)
+
+
+def _clean_legacy_task_tools(paths: DuctorPaths) -> None:
+    """Remove shipped background-task tools while preserving user-owned files."""
+    legacy_dir = paths.workspace / "tools" / "task_tools"
+    if not legacy_dir.is_dir():
+        return
+
+    for name in sorted(_LEGACY_TASK_TOOL_FILES):
+        candidate = legacy_dir / name
+        try:
+            if candidate.exists() or candidate.is_symlink():
+                candidate.unlink()
+        except OSError as exc:
+            logger.warning("Failed to remove legacy background-task tool %s: %s", candidate, exc)
+
+    try:
+        if not any(legacy_dir.iterdir()):
+            legacy_dir.rmdir()
+    except OSError as exc:
+        logger.warning(
+            "Failed to remove legacy background-task tool directory %s: %s",
+            legacy_dir,
+            exc,
+        )
 
 
 def _clean_orphan_symlinks(paths: DuctorPaths) -> None:
@@ -323,7 +355,6 @@ _REQUIRED_DIRS = (
     "workspace/tools/webhook_tools",
     "workspace/tools/agent_tools",
     "workspace/output_to_user",
-    "workspace/tasks",
     "workspace/skills",
     "config",
 )
@@ -341,10 +372,10 @@ def _ensure_required_dirs(paths: DuctorPaths) -> None:
 def init_workspace(paths: DuctorPaths) -> None:
     """Initialize the workspace: defaults sync, rule sync, config merge, cleanup."""
     logger.info("Workspace init started home=%s", paths.ductor_home)
-    _migrate_tasks_to_cron_tasks(paths)
     sync_bundled_skills(paths)
     _sync_home_defaults(paths)
     _ensure_required_dirs(paths)
+    _clean_legacy_task_tools(paths)
 
     # Deploy provider-specific rule files based on CLI auth status
     try:

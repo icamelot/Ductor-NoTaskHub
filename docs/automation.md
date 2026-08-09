@@ -5,7 +5,6 @@ ductor automation systems:
 | System | Trigger | Execution Context | Output |
 |---|---|---|---|
 | Sessions (`/session`) | user command | named session (persistent) | chat notification |
-| Delegated tasks (`TaskHub`) | task tool scripts (`/tasks/*` API) | shared background task runtime | chat notification + parent-session injection |
 | Cron jobs | schedule | isolated task folder | chat result |
 | Webhooks | HTTP POST | wake or isolated `cron_task` | chat result |
 | Heartbeat | interval | active main session | chat alert (non-ACK only) |
@@ -25,7 +24,7 @@ Key properties:
 - `/stop` cancels all sessions for the chat
 - `/stop_all` on the main agent also aborts active work across other agents (sub-agent fallback is local-only)
 - max 5 concurrent tasks, max 10 user-created sessions per chat
-- `/status` shows active background tasks
+- `/status` shows active named background sessions
 - `/session` background timeout uses `config.timeouts.background`
 
 Inter-agent sessions use deterministic scoped names (`ia.<sender-slug>.t<topic>.x<hash>`, or legacy `ia-<sender>` without source context) and are not created through `/session`. They live in the same `named_sessions.json` registry but are capped separately: max 32 per chat with oldest-idle eviction, and they never count against the 10-session user quota above.
@@ -38,23 +37,6 @@ Restart behavior:
 - Matrix-primary startup currently has no equivalent auto-recovery pipeline
 
 Status values for named-session runs: `ok`, `error:timeout`, `error:cli`, `error:internal`, `aborted`.
-
-## Delegated tasks (`TaskHub`, `/tasks`)
-
-Delegated tasks are separate from `/session`:
-
-- persisted in `~/.ductor/tasks.json`
-- task folders in `~/.ductor/workspace/tasks/<task_id>/`
-- managed via `/tasks` command (running/waiting/finished + cancel/cleanup controls)
-- created/resumed/cancelled/deleted through task tools (`tools/task_tools/*.py`) over `InternalAgentAPI /tasks/*`
-- timeout source: `config.tasks.timeout_seconds`
-
-Result flow:
-
-- task completion/failure is posted to the chat
-- result is injected into parent agent's current active session (`handle_task_result`)
-- task questions (`ask_parent.py`) are posted and injected via `handle_task_question`
-- forum-topic tasks route back to the originating topic via `thread_id` / `DUCTOR_TOPIC_ID`
 
 ## Cron jobs
 

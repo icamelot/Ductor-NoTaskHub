@@ -7,7 +7,7 @@ Multi-agent runtime: run multiple independent ductor agents in one process.
 - `multiagent/supervisor.py`: `AgentSupervisor` lifecycle, health, crash recovery, agents watcher
 - `multiagent/stack.py`: `AgentStack` container (config + bot + orchestrator)
 - `multiagent/bus.py`: `InterAgentBus` (sync + async inter-agent messaging)
-- `multiagent/internal_api.py`: localhost HTTP bridge for tool scripts (`/interagent/*`, `/tasks/*`)
+- `multiagent/internal_api.py`: localhost HTTP bridge for inter-agent tool scripts (`/interagent/*`)
 - `multiagent/models.py`: `SubAgentConfig`, merge helpers
 - `multiagent/registry.py`: `agents.json` read/write
 - `multiagent/health.py`: per-agent health model
@@ -22,7 +22,6 @@ AgentSupervisor
   +-- AgentStack "sub-*" (0..n)
   +-- InterAgentBus
   +-- InternalAgentAPI (localhost bridge)
-  +-- optional TaskHub (shared)
   +-- SharedKnowledgeSync
   +-- FileWatcher(agents.json)
 ```
@@ -33,12 +32,11 @@ Each stack is isolated (token/workspace/sessions), but shares process/event-loop
 
 1. start inter-agent bus
 2. start internal API
-3. optional shared task hub
-4. create/start main stack
-5. wait for main readiness
-6. start sub-agents from `agents.json`
-7. start shared knowledge sync
-8. start `agents.json` watcher
+3. create/start main stack
+4. wait for main readiness
+5. start sub-agents from `agents.json`
+6. start shared knowledge sync
+7. start `agents.json` watcher
 
 ## Dynamic agent changes
 
@@ -100,7 +98,6 @@ Shared across process:
 
 - `InterAgentBus`
 - `InternalAgentAPI`
-- optional shared `TaskHub`
 - central log file (`~/.ductor/logs/agent.log`)
 - shared knowledge source (`~/.ductor/SHAREDMEMORY.md`)
 
@@ -143,37 +140,6 @@ Inter-agent endpoints:
 - `GET /interagent/health`
 
 `POST /interagent/send_async` accepts the same routing fields as `AsyncSendOptions`, including `reply_to` and `silent`.
-
-Task endpoints (shared hub):
-
-- `POST /tasks/create`
-- `POST /tasks/resume`
-- `POST /tasks/ask_parent`
-- `GET /tasks/list`
-- `POST /tasks/cancel`
-- `POST /tasks/delete`
-
-Ownership checks apply for resume/cancel/delete when `from=<agent>` is present.
-
-`POST /tasks/create` also accepts `priority=interactive|background|batch`.
-
-## TaskHub integration
-
-When enabled, supervisor wires each stack into shared `TaskHub`:
-
-- per-agent CLI service
-- per-agent paths (`tasks_dir`)
-- task result callback
-- task question callback
-- agent primary chat ID mapping
-
-This enables task submission from any agent while preserving owner routing.
-
-Priority behavior is shared across agents:
-
-- `interactive` bypasses the per-chat concurrency cap
-- `background` is the default
-- `batch` keeps the same cap semantics as `background` but documents low-urgency work explicitly
 
 ## Shared knowledge sync
 

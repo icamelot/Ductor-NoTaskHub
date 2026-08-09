@@ -1,7 +1,7 @@
 """Callback helpers for inline keyboard handling in the Telegram bot.
 
 Extracts reusable patterns from the TelegramBot callback routing so the
-four selector handlers (model, cron, session, task) share a single
+three selector handlers (model, cron, session) share a single
 implementation.
 """
 
@@ -42,7 +42,7 @@ def button_grid_to_markup(grid: ButtonGrid | None) -> InlineKeyboardMarkup | Non
 
 
 # ---------------------------------------------------------------------------
-# Selector result editing (shared by model / cron / session / task wizards)
+# Selector result editing (shared by model / cron / session wizards)
 # ---------------------------------------------------------------------------
 
 

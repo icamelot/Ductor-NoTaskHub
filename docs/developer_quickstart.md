@@ -30,7 +30,6 @@ Primary runtime files/directories:
 
 - `~/.ductor/sessions.json`
 - `~/.ductor/named_sessions.json`
-- `~/.ductor/tasks.json`
 - `~/.ductor/chat_activity.json`
 - `~/.ductor/cron_jobs.json`
 - `~/.ductor/webhooks.json`
@@ -85,12 +84,10 @@ Runtime hot path:
 - `ductor_bot/orchestrator/lifecycle.py`
 - `ductor_bot/orchestrator/flows.py`
 
-Delivery/task/session core:
+Delivery/session core:
 
 - `ductor_bot/bus/`
 - `ductor_bot/session/manager.py`
-- `ductor_bot/tasks/hub.py`
-- `ductor_bot/tasks/registry.py`
 
 Provider/API/workspace core:
 
@@ -126,13 +123,6 @@ If background results look wrong:
 2. `ductor_bot/bus/bus.py`
 3. `ductor_bot/messenger/telegram/transport.py` (or `ductor_bot/messenger/matrix/transport.py`)
 
-If tasks are wrong:
-
-1. `ductor_bot/tasks/hub.py`
-2. `ductor_bot/tasks/registry.py`
-3. `ductor_bot/multiagent/internal_api.py`
-4. `ductor_bot/_home_defaults/workspace/tools/task_tools/*.py`
-
 If API is wrong:
 
 1. `ductor_bot/api/server.py`
@@ -146,10 +136,7 @@ If API is wrong:
 - `/reset` resets the currently active provider bucket for the active `SessionKey`.
 - session identity is transport-aware: `SessionKey(transport, chat_id, topic_id)`.
 - `/model` inside a topic updates only that topic session (not global config).
-- task tools now support permanent single-task removal via `delete_task.py` (`/tasks/delete`).
-- `create_task.py --priority interactive|background|batch` controls whether a task bypasses the per-chat concurrency cap.
 - `ask_agent_async.py` supports `--reply-to AGENT` and `--silent` for automated multi-agent pipelines.
-- task routing is topic-aware via `thread_id` and `DUCTOR_TOPIC_ID`.
 - API auth accepts optional `channel_id` for per-channel session isolation.
 - startup recovery uses `inflight_turns.json` + recovered named sessions.
 - auth allowlists (`allowed_user_ids`, `allowed_group_ids`) are hot-reloadable.

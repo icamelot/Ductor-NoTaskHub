@@ -88,7 +88,7 @@ class BackgroundObserver:
             if t.chat_id == sub.chat_id and t.asyncio_task and not t.asyncio_task.done()
         )
         if active >= MAX_TASKS_PER_CHAT:
-            msg = t("tasks.too_many", max=MAX_TASKS_PER_CHAT)
+            msg = t("sessions.too_many", max=MAX_TASKS_PER_CHAT)
             raise ValueError(msg)
 
         task_id = secrets.token_hex(4)
@@ -192,7 +192,7 @@ class BackgroundObserver:
                     _make_result(
                         bg_task,
                         t0,
-                        result_text=t("tasks.internal_error"),
+                        result_text=t("sessions.internal_error"),
                         status="error:internal",
                     )
                 )
@@ -259,7 +259,7 @@ class BackgroundObserver:
                     _make_result(
                         bg_task,
                         t0,
-                        result_text=t("tasks.internal_error"),
+                        result_text=t("sessions.internal_error"),
                         status="error:internal",
                         session_name=bg_task.session_name,
                     )

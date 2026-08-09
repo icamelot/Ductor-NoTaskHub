@@ -50,7 +50,7 @@ Propagation:
 - host CLI execution: merged into subprocess env via `_build_subprocess_env()`
 - Docker exec: injected as `-e` flags via `docker_wrap()`
 - Docker container creation: injected as `-e` flags via `_start_container()`
-- sub-agents and background tasks: inherited through the same execution paths
+- sub-agents and named background sessions: inherited through the same execution paths
 
 Priority (highest to lowest):
 
@@ -80,7 +80,7 @@ Changes take effect on the next CLI invocation (mtime-based cache invalidation, 
 | `permission_mode` | `str` | `"bypassPermissions"` | Provider sandbox/approval mode |
 | `cli_timeout` | `float` | `1800.0` | Legacy/global timeout. Still used by cron/webhook `cron_task`, inter-agent turns, stale-process heartbeat cleanup, and as fallback for unknown timeout paths |
 | `reasoning_effort` | `str` | `"medium"` | Default reasoning effort for Claude (`--effort`) and Codex (`-c model_reasoning_effort`); per-session override via `/effort` |
-| `append_system_prompt_files` | `list[str]` | `[]` | Workspace-relative files appended to the system prompt on every agent-driven turn (chat, named sessions, inter-agent, tasks); paths escaping the workspace and files over 256 KiB are skipped |
+| `append_system_prompt_files` | `list[str]` | `[]` | Workspace-relative files appended to the system prompt on every agent-driven turn (chat, named sessions, inter-agent, cron, webhook); paths escaping the workspace and files over 256 KiB are skipped |
 | `project_roots` | `dict[str, str]` | `{}` | Per-topic working-directory override: maps a topic key to a directory the CLI runs in instead of the shared workspace (see below) |
 | `file_access` | `str` | `"all"` | File access scope (`all`, `home`, `workspace`) for file sends and API `GET /files`; unknown values fall back to workspace-only |
 | `gemini_api_key` | `str \| None` | `None` | Config fallback key injected for Gemini API-key mode |
@@ -104,7 +104,6 @@ Changes take effect on the next CLI invocation (mtime-based cache invalidation, 
 | `cli_parameters` | `CLIParametersConfig` | see below | Provider-specific extra CLI flags |
 | `image` | `ImageConfig` | see below | Incoming image processing settings |
 | `timeouts` | `TimeoutConfig` | see below | Path-specific timeout policy (`normal`, `background`, `subagent`) |
-| `tasks` | `TasksConfig` | see below | Delegated background task system (`TaskHub`) |
 | `cron_delivery_retry` | `CronDeliveryRetryConfig` | see below | Opt-in resend of preserved cron results after a delivery failure |
 | `cron_preflight` | `CronPreflightConfig` | see below | Opt-in task-local gate that can skip a cron agent run |
 | `scene` | `SceneConfig` | see below | Scene indicators and technical footer |
@@ -217,7 +216,6 @@ Current execution-path usage:
 
 - foreground chat turns: `resolve_timeout(config, "normal")` -> `timeouts.normal`
 - named background sessions (`/session`): `timeouts.background`
-- delegated background tasks (`TaskHub`): `tasks.timeout_seconds`
 - cron + webhook `cron_task`: still `config.cli_timeout`
 - inter-agent turns: still `config.cli_timeout`
 - stale-process cleanup threshold: `config.cli_timeout * 2`
@@ -228,16 +226,6 @@ Implementation status note:
 - provider wrappers and executor support `TimeoutController` in production paths.
 - normal/streaming/named-session/heartbeat flows create controllers via `flows._make_timeout_controller(...)`.
 - timeout warning/extension callbacks are not yet wired to Telegram/API system-status output, so user-visible timeout status labels are not emitted by default.
-
-## `TasksConfig`
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `enabled` | `bool` | `true` | Enables shared delegated task system (`TaskHub`) |
-| `max_parallel` | `int` | `5` | Max concurrent running tasks per chat in `TaskHub` |
-| `timeout_seconds` | `float` | `3600.0` | Timeout per delegated task run |
-| `finished_retention_hours` | `int` | `168` | Age limit for finished task history (done/failed/cancelled); `0` disables age pruning |
-| `finished_keep_last` | `int` | `100` | Max finished tasks kept (newest first); `0` disables count pruning. Age and count are independent limits |
 
 ## `CronDeliveryRetryConfig`
 
@@ -589,7 +577,7 @@ Hot-reloadable top-level fields:
 Current non-hot fields that often surprise people:
 
 - `allowed_channel_ids` exists on `AgentConfig` but is not currently classified as hot-reloadable by `ConfigReloader`, so channel allowlist changes still require restart
-- `notifications`, `transcription`, `timeouts`, and `tasks` are restart-required
+- `notifications`, `transcription`, and `timeouts` are restart-required
 
 Observer lifecycle caveat:
 
@@ -601,7 +589,7 @@ Restart-required top-level fields:
 
 - `transport`, `telegram_token`, `matrix`
 - `docker`, `api`, `webhooks`
-- `ductor_home`, `log_level`, `gemini_api_key`, `notifications`, `transcription`, `timeouts`, `tasks`
+- `ductor_home`, `log_level`, `gemini_api_key`, `notifications`, `transcription`, `timeouts`
 - `cron_delivery_retry`, `cron_preflight` (both start/stop or re-gate observer behavior at startup)
 
 Restart classification is computed from `AgentConfig` top-level schema fields.
@@ -757,10 +745,8 @@ Managed via:
 Timeout nuance:
 
 - `SubAgentConfig` currently has no dedicated `timeouts` field.
-- `SubAgentConfig` currently has no dedicated `tasks` field.
 - `SubAgentConfig` also has no dedicated `scene`, `notifications`, `transcription`, `language`, or `allowed_channel_ids` fields.
 - sub-agents inherit the main agent `timeouts` block through merge base.
-- sub-agents inherit the main agent `tasks` block through merge base.
 - the same inheritance currently applies to `scene`, `notifications`, `transcription`, `language`, and `allowed_channel_ids`.
 
 Example:

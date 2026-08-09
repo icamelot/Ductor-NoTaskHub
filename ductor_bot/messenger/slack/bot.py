@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from ductor_bot.infra.updater import UpdateObserver
     from ductor_bot.multiagent.bus import AsyncInterAgentResult
     from ductor_bot.orchestrator.core import Orchestrator
-    from ductor_bot.tasks.models import TaskResult
     from ductor_bot.workspace.paths import DuctorPaths
 
 if TYPE_CHECKING:
@@ -703,7 +702,7 @@ class SlackBot:
             SEP,
             f"**{t('help.cat_daily')}**\n{_line('new')}\n{_line('stop')}\n{_line('stop_all')}\n"
             f"{_line('model')}\n{_line('status')}\n{_line('memory')}",
-            f"**{t('help.cat_automation')}**\n{_line('session')}\n{_line('tasks')}\n{_line('cron')}",
+            f"**{t('help.cat_automation')}**\n{_line('session')}\n{_line('cron')}",
             f"**{t('help.cat_multiagent')}**\n{_line('agent_commands')}\n{_line('agents')}\n"
             f"{_line('agent_start')}\n{_line('agent_stop')}\n{_line('agent_restart')}",
             f"**{t('help.cat_browse')}**\n{_line('showfiles')}\n{_line('info')}\n{_line('help')}",
@@ -1024,29 +1023,6 @@ class SlackBot:
             await self._notification_service.notify_all(text)
             return
         env = from_interagent_result(result, chat_id)
-        env.transport = "sl"
-        await self._bus.submit(env)
-
-    async def on_task_result(self, result: TaskResult) -> None:
-        from ductor_bot.bus.adapters import from_task_result
-
-        env = from_task_result(result)
-        env.transport = "sl"
-        await self._bus.submit(env)
-
-    async def on_task_question(
-        self,
-        task_id: str,
-        question: str,
-        prompt_preview: str,
-        chat_id: int,
-        thread_id: int | None = None,
-    ) -> None:
-        from ductor_bot.bus.adapters import from_task_question
-
-        if not chat_id:
-            chat_id = self._default_chat_id()
-        env = from_task_question(task_id, question, prompt_preview, chat_id, topic_id=thread_id)
         env.transport = "sl"
         await self._bus.submit(env)
 

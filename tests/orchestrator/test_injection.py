@@ -33,7 +33,7 @@ class TestInjectPromptProviderOverride:
         orch = _make_orch(active)
 
         with patch("ductor_bot.orchestrator.injection._update_session", new=AsyncMock()):
-            await _inject_prompt(orch, "hi", chat_id=1, process_label="task_result:x")
+            await _inject_prompt(orch, "hi", chat_id=1, process_label="async-result")
 
         req = _captured_request(orch)
         assert req.provider_override == "codex"
@@ -44,7 +44,7 @@ class TestInjectPromptProviderOverride:
         orch = _make_orch(None)
 
         with patch("ductor_bot.orchestrator.injection._update_session", new=AsyncMock()):
-            await _inject_prompt(orch, "hi", chat_id=1, process_label="task_result:x")
+            await _inject_prompt(orch, "hi", chat_id=1, process_label="async-result")
 
         req = _captured_request(orch)
         assert req.provider_override is None
@@ -56,7 +56,7 @@ class TestInjectPromptProviderOverride:
         orch = _make_orch(active)
 
         with patch("ductor_bot.orchestrator.injection._update_session", new=AsyncMock()):
-            await _inject_prompt(orch, "hi", chat_id=1, process_label="task_result:x")
+            await _inject_prompt(orch, "hi", chat_id=1, process_label="async-result")
 
         req = _captured_request(orch)
         assert req.provider_override == "claude"
@@ -75,7 +75,7 @@ async def test_inject_prompt_appends_configured_files(tmp_path: Path) -> None:
     orch._config.append_system_prompt_files = ["PERSONA.md"]
 
     with patch("ductor_bot.orchestrator.injection._update_session", new=AsyncMock()):
-        await _inject_prompt(orch, "hi", chat_id=1, process_label="task_result:x")
+        await _inject_prompt(orch, "hi", chat_id=1, process_label="async-result")
 
     req = _captured_request(orch)
     assert req.append_system_prompt is not None
@@ -92,7 +92,7 @@ async def test_inject_prompt_no_files_leaves_append_none(tmp_path: Path) -> None
     orch._config.append_system_prompt_files = []
 
     with patch("ductor_bot.orchestrator.injection._update_session", new=AsyncMock()):
-        await _inject_prompt(orch, "hi", chat_id=1, process_label="task_result:x")
+        await _inject_prompt(orch, "hi", chat_id=1, process_label="async-result")
 
     req = _captured_request(orch)
     assert req.append_system_prompt is None

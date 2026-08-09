@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from aiogram.types import Message
 
+_REMOVED_TASK_COMMAND = "tasks"
+
 
 def _make_message(
     chat_id: int = 1,
@@ -571,6 +573,7 @@ class TestIsQuickCommand:
             ("/where", True),
             ("/leave", True),
             ("/leave -1001234567890", True),
+            (f"/{_REMOVED_TASK_COMMAND}", False),
             ("/new", False),
             ("/stop", False),
             ("/restart", False),

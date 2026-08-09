@@ -162,7 +162,7 @@ async def test_injection_updates_result_text() -> None:
     t.deliver.assert_awaited_once()
 
 
-async def test_task_result_injection_uses_task_result_label() -> None:
+async def test_interagent_injection_uses_interagent_label() -> None:
     bus = MessageBus()
     t = _mock_transport()
     bus.register_transport(t)
@@ -172,18 +172,18 @@ async def test_task_result_injection_uses_task_result_label() -> None:
     bus.set_injector(injector)
 
     env = _env(
-        origin=Origin.TASK_RESULT,
+        origin=Origin.INTERAGENT,
         envelope_id="abc123",
         needs_injection=True,
-        prompt="Task result",
+        prompt="Async result",
         chat_id=10,
     )
     await bus.submit(env)
 
     injector.inject_prompt.assert_awaited_once_with(
-        "Task result",
+        "Async result",
         10,
-        "task_result:abc123",
+        "interagent:abc123",
         topic_id=None,
         transport="tg",
     )

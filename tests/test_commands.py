@@ -1,6 +1,6 @@
 """Tests for command definitions."""
 
-from ductor_bot.commands import BOT_COMMANDS
+from ductor_bot.commands import BOT_COMMANDS, get_bot_commands
 
 
 def test_commands_is_list_of_tuples() -> None:
@@ -21,3 +21,7 @@ def test_expected_commands_present() -> None:
 def test_no_duplicate_commands() -> None:
     names = [cmd for cmd, _ in BOT_COMMANDS]
     assert len(names) == len(set(names))
+
+
+def test_removed_background_command_is_not_advertised() -> None:
+    assert "tasks" not in {name for name, _description in get_bot_commands()}

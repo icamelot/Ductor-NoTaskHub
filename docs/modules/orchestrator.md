@@ -8,14 +8,14 @@ Central routing layer between ingress transports (Telegram/Matrix/API) and CLI e
 - `orchestrator/lifecycle.py`: async factory/startup/shutdown helpers
 - `orchestrator/observers.py`: `ObserverManager` for all observer lifecycle wiring
 - `orchestrator/providers.py`: `ProviderManager` (provider auth/model resolution/metadata)
-- `orchestrator/injection.py`: shared session injection for inter-agent and task flows
+- `orchestrator/injection.py`: shared session injection for inter-agent flows
 - `orchestrator/registry.py`: `CommandRegistry`, `OrchestratorResult`
 - `orchestrator/commands.py`: slash-command handlers
 - `orchestrator/flows.py`: normal/streaming/named-session/heartbeat flows
 - `orchestrator/directives.py`: leading `@...` parser
 - `orchestrator/hooks.py`: message hooks (`MAINMEMORY_REMINDER`, delegation hints)
 - `orchestrator/memory_flush.py`: silent pre-compaction memory flush + optional `MAINMEMORY.md` compaction
-- `orchestrator/selectors/*`: model/cron/session/task selector modules + selector types
+- `orchestrator/selectors/*`: model/cron/session selector modules + selector types
 
 ## Why it was split
 
@@ -38,7 +38,7 @@ High-level steps:
 4. instantiate `Orchestrator` (sessions, CLI service, hook registry, optional memory flusher)
 5. provider auth detection + available-provider update
 6. initialize Gemini/Antigravity/Codex cache observers
-7. initialize/start task observers (`Background`, `Cron`, `Webhook`) + `Heartbeat` + `Cleanup`
+7. initialize/start observers (`Background`, `Cron`, `Webhook`, `Heartbeat`, `Cleanup`)
 8. start rule/skill watcher tasks
 9. optional API server startup
 10. start config reloader
@@ -72,7 +72,7 @@ Common path:
 
 Registered command handlers:
 
-- `/new`, `/reset`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/tasks`
+- `/new`, `/reset`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`
 
 `/new` resets only the currently configured provider bucket for the active `SessionKey`.
 Other provider buckets for the same chat/topic remain intact.
@@ -112,7 +112,6 @@ Modules:
 - `model_selector.py` (`ms:*`)
 - `cron_selector.py` (`crn:*`)
 - `session_selector.py` (`nsc:*`)
-- `task_selector.py` (`tsc:*`)
 - shared models/utilities in `selectors/models.py`, `selectors/utils.py`
 
 Important model-selector behavior:
@@ -150,8 +149,6 @@ Important model-selector behavior:
 Shared helper `_inject_prompt(...)` is used by:
 
 - `handle_async_interagent_result(...)`
-- `handle_task_result(...)`
-- `handle_task_question(...)`
 - public `inject_prompt(...)` on orchestrator
 
 All injection paths respect `topic_id` when provided.

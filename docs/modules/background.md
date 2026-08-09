@@ -2,7 +2,7 @@
 
 Named background session execution for `/session`.
 
-Scope: this module is only `/session` named-session execution. Delegated tasks are documented in `docs/modules/tasks.md`.
+Scope: this module covers only `/session` named-session execution.
 
 ## Files
 

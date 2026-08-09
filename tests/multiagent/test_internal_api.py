@@ -11,6 +11,8 @@ from ductor_bot.multiagent.bus import InterAgentBus
 from ductor_bot.multiagent.health import AgentHealth
 from ductor_bot.multiagent.internal_api import InternalAgentAPI, _normalise_transport
 
+_REMOVED_API_ROOT = "tasks"
+
 
 @pytest.fixture
 def bus() -> InterAgentBus:
@@ -251,31 +253,22 @@ class TestHandleHealth:
         assert data["agents"]["sub1"]["restart_count"] == 1
 
 
-class TestHandleTaskCancel:
-    async def test_cancel_logs_sender(
-        self,
-        client: TestClient,
-        api: InternalAgentAPI,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        hub = MagicMock()
-        hub.cancel = AsyncMock(return_value=True)
-        hub.registry.get.return_value = MagicMock(parent_agent="main")
-        api.set_task_hub(hub)
-        caplog.set_level("INFO", logger="ductor_bot.multiagent.internal_api")
-
-        resp = await client.post(
-            "/tasks/cancel",
-            json={"task_id": "task-123", "from": "main"},
-        )
-
-        assert resp.status == 200
-        data = await resp.json()
-        assert data["success"] is True
-        hub.cancel.assert_awaited_once_with("task-123")
-
-        messages = "\n".join(record.getMessage() for record in caplog.records)
-        assert "Task cancel via API id=task-123 from=main success=True" in messages
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("post", f"/{_REMOVED_API_ROOT}/create"),
+        ("post", f"/{_REMOVED_API_ROOT}/resume"),
+        ("post", f"/{_REMOVED_API_ROOT}/ask_parent"),
+        ("get", f"/{_REMOVED_API_ROOT}/list"),
+        ("post", f"/{_REMOVED_API_ROOT}/cancel"),
+        ("post", f"/{_REMOVED_API_ROOT}/delete"),
+    ],
+)
+async def test_removed_background_routes_are_not_registered(
+    client: TestClient, method: str, path: str
+) -> None:
+    response = await getattr(client, method)(path)
+    assert response.status == 404
 
 
 class TestLifecycle:

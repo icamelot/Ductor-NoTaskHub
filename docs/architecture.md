@@ -22,7 +22,7 @@ Telegram path:                          Matrix path:
   -> Telegram message (stream edits)
 
 Background/async results (both transports):
-  -> Observer/TaskHub/InterAgentBus callback
+  -> Observer/InterAgentBus callback
   -> bus.adapters -> Envelope
   -> MessageBus
   -> optional lock + optional session injection
@@ -64,9 +64,8 @@ Both implement `BotProtocol`. Adding a new transport requires only a new factory
 
 1. start `InterAgentBus`
 2. start `InternalAgentAPI`
-3. optional shared `TaskHub` (`tasks.enabled=true`)
-4. create/start main `AgentStack`
-5. wait for main readiness (`_main_ready`)
+3. create/start main `AgentStack`
+4. wait for main readiness (`_main_ready`)
 6. load/start sub-agents from `agents.json`
 7. start `SharedKnowledgeSync`
 8. start `agents.json` watcher
@@ -106,18 +105,18 @@ Matrix startup follows a similar pattern (orchestrator creation, bus wiring, obs
 
 Bot-level handlers (`messenger/telegram/app.py`):
 
-- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/interrupt`, `/restart`, `/new`, `/reset`, `/session`, `/sessions`, `/tasks`, `/agent_commands`
+- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/interrupt`, `/restart`, `/new`, `/reset`, `/session`, `/sessions`, `/agent_commands`
 - main-agent-only handlers: `/agents`, `/agent_start`, `/agent_stop`, `/agent_restart`
 
 Matrix command ownership (`messenger/matrix/bot.py`):
 
 - direct transport commands: `!stop`, `!stop_all`, `!interrupt`, `!restart`, `!new`, `!reset`, `!help`, `!info`, `!session`, `!showfiles`, `!agent_commands`
-- orchestrator-routed commands: `!status`, `!model`, `!memory`, `!cron`, `!diagnose`, `!upgrade`, `!sessions`, `!tasks`
+- orchestrator-routed commands: `!status`, `!model`, `!memory`, `!cron`, `!diagnose`, `!upgrade`, `!sessions`
 - main-agent-only multi-agent commands: `!agents`, `!agent_start`, `!agent_stop`, `!agent_restart` (`/` prefix also supported)
 
 Orchestrator command registry (`orchestrator/commands.py`):
 
-- `/new`, `/reset`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/tasks`
+- `/new`, `/reset`, `/status`, `/model`, `/memory`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`
 - multi-agent commands are registered at runtime by supervisor hook
 
 Abort behavior:
@@ -127,7 +126,7 @@ Abort behavior:
 
 Quick-command bypass (`SequentialMiddleware`):
 
-- `/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`, `/sessions`, `/tasks`, `/where`, `/leave`
+- `/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`, `/sessions`, `/where`, `/leave`
 
 ## Session and Topic Model
 
@@ -200,15 +199,6 @@ Successful empty-result safeguard:
   - background: `/session @session-name <message>`
 - `/sessions` interactive management via selector callbacks
 
-### Delegated tasks (`TaskHub`)
-
-- shared registry: `~/.ductor/tasks.json`
-- folders: `~/.ductor/workspace/tasks/<task_id>/`
-- endpoints via internal API (`/tasks/*`)
-- topic-aware routing: task results/questions retain `thread_id` and are injected back into originating topic session
-- task tools receive `DUCTOR_CHAT_ID` and optional `DUCTOR_TOPIC_ID`
-- single-task permanent delete: `/tasks/delete` + `TaskRegistry.delete()`
-
 ## MessageBus and Delivery
 
 `MessageBus` replaces fragmented delivery paths.
@@ -229,7 +219,6 @@ Special callback namespaces:
 - `ms:*` model selector
 - `crn:*` cron selector
 - `nsc:*` session selector
-- `tsc:*` task selector
 - `ns:*` named-session follow-up
 - `sf:*` / `sf!` file browser
 
@@ -271,7 +260,7 @@ Zone rules (`workspace/init.py`):
 
 - Zone 2 overwrite:
   - `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`
-  - tool scripts under `workspace/tools/{cron,webhook,agent,task}_tools/*.py`
+  - tool scripts under `workspace/tools/{cron,webhook,agent}_tools/*.py`
 - Zone 3 seed-once for other files
 - `RULES*.md` templates are selected/deployed by `RulesSelector`
 
@@ -283,7 +272,7 @@ Rule sync:
 ## Multi-Agent Notes
 
 - sub-agents are full stacks with own transport credentials/workspace/session files (each sub-agent can use a different transport)
-- all stacks share one event loop, inter-agent bus, and optional shared task hub
+- all stacks share one event loop and inter-agent bus
 - async inter-agent results are injected via bus envelopes
 - provider switch during scoped `ia.<sender-slug>.t<topic>.x<hash>` conversations (legacy `ia-<sender>` without source context) auto-resets that named session and surfaces a provider-switch notice
 - async agent-tool pipelines can route replies explicitly via `reply_to` and suppress recipient noise via `silent`

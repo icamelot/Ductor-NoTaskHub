@@ -180,7 +180,6 @@ async def test_hook_resets_on_new_session(orch: Orchestrator) -> None:
     await orch.reset_active_provider_session(SessionKey(chat_id=1))
 
     # Messages after reset should NOT carry the mainmemory reminder (counter back to 0)
-    # (DELEGATION_BRIEF fires on new session, but that's expected and correct)
     await normal(orch, SessionKey(chat_id=1), "after-reset")
     last_request = mock_execute.call_args[0][0]
     assert "MEMORY CHECK" not in last_request.prompt
@@ -220,6 +219,12 @@ async def test_reflection_hook_not_registered_when_disabled(
     """Default orch (enabled=False) must not have the reflection hook."""
     names = [h.name for h in orch._hook_registry._hooks]
     assert "memory_reflection" not in names
+
+
+async def test_removed_delegation_hooks_are_not_registered(orch: Orchestrator) -> None:
+    names = {hook.name for hook in orch._hook_registry._hooks}
+    assert "delegation_brief" not in names
+    assert "delegation_reminder" not in names
 
 
 async def test_reflection_hook_registered_when_enabled(

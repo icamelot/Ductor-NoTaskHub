@@ -6,16 +6,16 @@ from ductor_bot.bus.envelope import DeliveryMode, Envelope, LockMode, Origin
 
 
 def test_origin_values() -> None:
-    assert Origin.BACKGROUND.value == "background"
-    assert Origin.CRON.value == "cron"
-    assert Origin.WEBHOOK_WAKE.value == "webhook_wake"
-    assert Origin.WEBHOOK_CRON.value == "webhook_cron"
-    assert Origin.HEARTBEAT.value == "heartbeat"
-    assert Origin.INTERAGENT.value == "interagent"
-    assert Origin.TASK_RESULT.value == "task_result"
-    assert Origin.TASK_QUESTION.value == "task_question"
-    assert Origin.USER.value == "user"
-    assert Origin.API.value == "api"
+    assert {origin.value for origin in Origin} == {
+        "background",
+        "cron",
+        "webhook_wake",
+        "webhook_cron",
+        "heartbeat",
+        "interagent",
+        "user",
+        "api",
+    }
 
 
 def test_delivery_mode_values() -> None:

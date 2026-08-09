@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ductor_bot.i18n import LANGUAGES, init, t, t_cmd, t_plural, t_rich
+from ductor_bot.i18n import LANGUAGES, init, t, t_cmd, t_rich
 from ductor_bot.i18n.loader import TranslationStore, _flatten, _load_toml
 
 _I18N_ROOT = Path(__file__).resolve().parent.parent.parent / "ductor_bot" / "i18n"
@@ -137,18 +137,6 @@ def test_t_cmd_returns_string() -> None:
     assert len(result) > 0
 
 
-def test_t_plural_one() -> None:
-    init("en")
-    result = t_plural("tasks.cancelled", 1)
-    assert "1 task." in result
-
-
-def test_t_plural_many() -> None:
-    init("en")
-    result = t_plural("tasks.cancelled", 5)
-    assert "5 tasks." in result
-
-
 # -- TOML file integrity -------------------------------------------------------
 
 
@@ -214,3 +202,18 @@ def test_all_language_dirs_exist() -> None:
     for lang_code in LANGUAGES:
         lang_dir = _I18N_ROOT / lang_code
         assert lang_dir.is_dir(), f"Language dir missing: {lang_dir}"
+
+
+def test_removed_background_task_keys_are_absent_from_every_locale() -> None:
+    for lang_code in LANGUAGES:
+        lang_dir = _I18N_ROOT / lang_code
+        chat_keys = _load_toml(lang_dir / "chat.toml")
+        command_keys = _load_toml(lang_dir / "commands.toml")
+
+        assert not any(key.startswith("tasks.") for key in chat_keys)
+        assert "bot.tasks" not in command_keys
+
+
+def test_named_session_internal_error_is_available() -> None:
+    init("en")
+    assert "[MISSING:" not in t("sessions.internal_error")

@@ -23,7 +23,7 @@ For shared messenger protocols and the transport registry, see
 
 Bot-level handlers:
 
-- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/restart`, `/new`, `/reset`, `/session`, `/sessions`, `/tasks`, `/agent_commands`
+- `/start`, `/help`, `/info`, `/showfiles`, `/stop`, `/stop_all`, `/restart`, `/new`, `/reset`, `/session`, `/sessions`, `/agent_commands`
 - main-agent only: `/agents`, `/agent_start`, `/agent_stop`, `/agent_restart`
 - hidden but supported: `/where`, `/leave` (not in Telegram command popup)
 
@@ -33,7 +33,7 @@ Immediate middleware-handled command path (pre-lock, no normal dispatch):
 
 Orchestrator-routed commands:
 
-- `/status`, `/memory`, `/model`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/tasks`, `/reset`
+- `/status`, `/memory`, `/model`, `/cron`, `/diagnose`, `/upgrade`, `/sessions`, `/reset`
 
 ## Middleware behavior
 
@@ -66,7 +66,7 @@ Flow order:
 
 Quick commands:
 
-- `/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`, `/sessions`, `/tasks`, `/where`, `/leave`
+- `/status`, `/memory`, `/cron`, `/diagnose`, `/model`, `/showfiles`, `/sessions`, `/where`, `/leave`
 
 Queue APIs:
 
@@ -174,7 +174,6 @@ Special callback namespaces:
 - `ms:*` model selector
 - `crn:*` cron selector
 - `nsc:*` session selector
-- `tsc:*` task selector
 - `ns:*` named-session follow-up callbacks
 - `sf:*` / `sf!` file browser
 
@@ -187,7 +186,7 @@ The bot no longer owns fragmented `deliver_*` handlers.
 Current model:
 
 - startup wires observer outputs to `MessageBus` via `orch.wire_observers_to_bus(...)`
-- async inter-agent and task callbacks convert results through `bus/adapters.py`
+- async inter-agent callbacks convert results through `bus/adapters.py`
 - `MessageBus` handles lock/injection/delivery using shared `LockPool`
 
 Webhook wake path:

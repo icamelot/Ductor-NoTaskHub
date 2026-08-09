@@ -233,16 +233,6 @@ class SlackConfig(BaseModel):
     allowed_users: list[str] = Field(default_factory=list)
 
 
-class TasksConfig(BaseModel):
-    """Settings for background task delegation."""
-
-    enabled: bool = True
-    max_parallel: int = 5
-    timeout_seconds: float = 3600.0
-    finished_retention_hours: int = 168
-    finished_keep_last: int = 100
-
-
 class CronDeliveryRetryConfig(BaseModel):
     """Retry delivery of preserved cron results without rerunning the agent."""
 
@@ -457,7 +447,6 @@ class AgentConfig(BaseModel):
     cli_parameters: CLIParametersConfig = Field(default_factory=CLIParametersConfig)
     image: ImageConfig = Field(default_factory=ImageConfig)
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
-    tasks: TasksConfig = Field(default_factory=TasksConfig)
     cron_delivery_retry: CronDeliveryRetryConfig = Field(default_factory=CronDeliveryRetryConfig)
     cron_preflight: CronPreflightConfig = Field(default_factory=CronPreflightConfig)
     scene: SceneConfig = Field(default_factory=SceneConfig)

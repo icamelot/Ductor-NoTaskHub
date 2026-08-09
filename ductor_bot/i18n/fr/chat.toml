@@ -113,7 +113,7 @@ session_line = "Session : `{sid}`"
 messages_line = "Messages : {count}"
 tokens_line = "Tokens : {tokens}"
 cost_line = "Coût : ${cost}"
-bg_header = "Tâches en arrière-plan : {count} en cours"
+bg_header = "Sessions nommées : {count} en cours"
 auth_header = "Auth :"
 agents_header = "Agents :"
 
@@ -153,43 +153,13 @@ codex_cache_not_loaded = "Cache modèles Codex : Non chargé"
 codex_cache_info = "Cache modèles Codex :\n  Dernière mise à jour : {updated}\n  Modèles en cache : {count}\n  Modèle par défaut : {default}"
 health_header = "**Santé multi-agent :**"
 
-# -- Tâches --------------------------------------------------------------------
-
-[tasks]
-header = "**Tâches en arrière-plan**"
-disabled = "Le système de tâches n'est pas activé."
-empty = "Aucune tâche en arrière-plan."
-hint = "Les tâches sont créées par l'agent pour les travaux de longue durée."
-too_many = "Trop de tâches en arrière-plan ({max} maximum)"
-internal_error = "Erreur interne (vérifier les logs)"
-
-cancelled_one = "{count} tâche annulée."
-cancelled_other = "{count} tâches annulées."
-no_running = "Aucune tâche en cours."
-task_cancelled = "Tâche `{id}` annulée."
-task_not_running = "La tâche `{id}` ne tourne pas."
-cleaned_one = "{count} tâche terminée supprimée."
-cleaned_other = "{count} tâches terminées supprimées."
-nothing_to_clean = "Rien à nettoyer."
-
-running_header = "**En cours**"
-waiting_header = "**En attente de réponse**"
-finished_header = "**Terminées**"
-
-btn_cancel = "Annuler {name}"
-btn_cancel_all = "Tout annuler"
-btn_refresh = "Actualiser"
-btn_delete_finished = "Supprimer terminées"
-
-summary_running = "En cours : {count}"
-summary_waiting = "En attente : {count}"
-summary_finished = "Terminées : {count}"
-
 # -- Sélecteur de sessions ----------------------------------------------------
 
 [sessions]
 header = "**Sessions**"
 empty = "Aucune session active."
+too_many = "Trop de sessions nommées ({max} maximum)"
+internal_error = "Erreur interne (vérifier les logs)"
 start_hint = "Lance-en une avec `/session <prompt>`."
 followup_hint = "Relancer : `@<nom> <message>`"
 active_count = "Actives : {count}"

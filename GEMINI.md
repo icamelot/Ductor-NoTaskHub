@@ -54,7 +54,7 @@ API (optional):
 Background and async delivery:
 
 ```text
-Observer / TaskHub / InterAgentBus callback
+Observer / InterAgentBus callback
   -> bus.adapters -> Envelope -> MessageBus
   -> optional shared lock + optional session injection
   -> registered transport adapters (TelegramTransport / MatrixTransport)
@@ -68,11 +68,10 @@ Observer / TaskHub / InterAgentBus callback
 | `messenger/` | transport protocol, capabilities, notifications, registry, multi-transport adapter |
 | `messenger/telegram/` | Telegram transport: middleware, handlers, startup, callback routing, file/media UX |
 | `messenger/matrix/` | Matrix transport: sync loop, auth, segment streaming, reaction buttons, media |
-| `orchestrator/` | command routing, directives/hooks, flows, provider/session/task wiring, lifecycle split |
+| `orchestrator/` | command routing, directives/hooks, flows, provider/session wiring, lifecycle split |
 | `bus/` | unified `Envelope`, `MessageBus`, shared `LockPool`, delivery adapters |
 | `cli/` | provider wrappers, stream parsing, auth detection, model caches, process registry |
 | `session/` | `SessionKey(transport, chat_id, topic_id)`, provider-isolated session buckets, named sessions |
-| `tasks/` | delegated background task runtime (`TaskHub`) and persistent registry |
 | `background/` | named background session execution for `/session` |
 | `multiagent/` | supervisor, inter-agent bus, internal localhost API bridge, shared knowledge sync |
 | `api/` | optional direct WebSocket API and authenticated file endpoints |
@@ -88,7 +87,7 @@ Observer / TaskHub / InterAgentBus callback
 - Session identity is `SessionKey(transport, chat_id, topic_id)` across Telegram chats/topics, Matrix rooms (mapped int), and API channel isolation.
 - `/new` resets the configured default-provider bucket for the active session key.
 - `/reset` resets the currently active provider bucket for the active session key.
-- `MessageBus` is the single async delivery path for observers, task callbacks, webhook wake results, and async inter-agent responses. Delivery is transport-aware: UNICAST envelopes route to the matching transport only, with cascading fallback when the target transport is unavailable.
+- `MessageBus` is the single async delivery path for observers, webhook wake results, and async inter-agent responses. Delivery is transport-aware: UNICAST envelopes route to the matching transport only, with cascading fallback when the target transport is unavailable.
 - Telegram ingress and `MessageBus` share one `LockPool`; `ApiServer` currently uses its own lock pool.
 - Workspace init is zone-based:
   - Zone 2 overwrite: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, framework-managed tool scripts
@@ -158,7 +157,6 @@ Nuances:
 - `.env`
 - `sessions.json`
 - `named_sessions.json`
-- `tasks.json`
 - `cron_jobs.json`
 - `webhooks.json`
 - `agents.json`

@@ -119,23 +119,7 @@ Bot:   [remembers exactly where you left off]
 
 Sessions work everywhere — in your single chat, in group topics, in sub-agent chats. Think of them as opening a second terminal window next to your current one.
 
-### 4. Background tasks (async delegation)
-
-Any chat can delegate long-running work to a background task. You keep chatting while the task runs autonomously. When it finishes, the result flows back into your conversation.
-
-```text
-You:   "Research the top 5 competitors and write a summary"
-Bot:   → delegates to background task, you keep chatting
-Bot:   → task finishes, result appears in your chat
-
-You:   "Delegate this: generate reports for all Q4 metrics"
-Bot:   → explicitly delegated, runs in background
-Bot:   → task has a question? It asks the agent → agent asks you → you answer → task continues
-```
-
-Each task gets its own memory file (`TASKMEMORY.md`) and can be resumed with follow-ups.
-
-### 5. Sub-agents (fully isolated second agent)
+### 4. Sub-agents (fully isolated second agent)
 
 Sub-agents are completely separate bots — own chat, own workspace, own memory, own CLI auth, own config settings (heartbeat, timeouts, model defaults, etc.). Each sub-agent can use a different transport (e.g. main on Telegram, sub-agent on Matrix).
 
@@ -161,13 +145,13 @@ Main chat:  "Ask codex-agent to write tests for the API"
 
 ### Comparison
 
-| | Single chat | Group topics | Named sessions | Background tasks | Sub-agents |
-|---|---|---|---|---|---|
-| **What it is** | Your main 1:1 chat | One topic = one chat | Extra context in any chat | "Do this while I keep working" | Separate bot, own everything |
-| **Context** | One per provider | One per topic per provider | Own context per session | Own context, result flows back | Fully isolated |
-| **Workspace** | `~/.ductor/` | Shared with main | Shared with parent chat | Shared with parent agent | Own under `~/.ductor/agents/` |
-| **Config** | Main config | Shared with main | Shared with parent chat | Shared with parent agent | Own config (heartbeat, timeouts, model, ...) |
-| **Setup** | Automatic | Create group + enable topics | `/session <prompt>` | Automatic or "delegate this" | Telegram: `ductor agents add`; Matrix: `agents.json` / tool scripts |
+| | Single chat | Group topics | Named sessions | Sub-agents |
+|---|---|---|---|---|
+| **What it is** | Your main 1:1 chat | One topic = one chat | Extra context in any chat | Separate bot, own everything |
+| **Context** | One per provider | One per topic per provider | Own context per session | Fully isolated |
+| **Workspace** | `~/.ductor/` | Shared with main | Shared with parent chat | Own under `~/.ductor/agents/` |
+| **Config** | Main config | Shared with main | Shared with parent chat | Own config (heartbeat, timeouts, model, ...) |
+| **Setup** | Automatic | Create group + enable topics | `/session <prompt>` | Telegram: `ductor agents add`; Matrix: `agents.json` / tool scripts |
 
 ### How it all fits together
 
@@ -188,7 +172,7 @@ Main chat:  "Ask codex-agent to write tests for the API"
         ├── own single chat
         ├── own group support
         ├── own named sessions
-        └── own background tasks
+        └── own named sessions
 ```
 
 ## Features
@@ -208,7 +192,6 @@ Main chat:  "Ask codex-agent to write tests for the API"
 - **Image processing** — auto-resize and WebP conversion for incoming images (configurable)
 - **Media transcription hooks** — configurable external audio/video transcription commands for bundled media tools
 - **Notification routing** — startup/upgrade lifecycle messages can target specific chats/topics
-- **Task priorities** — `interactive`, `background`, and `batch` scheduling modes for background work
 - **Telegram status reactions** — stage-aware emoji tracker on the user message while the agent works
 - **Config hot-reload** — most settings update without restart (including language, scene, image)
 - **Docker sandbox** — optional sidecar container with configurable host mounts
@@ -379,12 +362,11 @@ This is **hot-reloadable** — change the language without restarting the bot.
 | `/reset` | Reset the currently active provider session for this chat/topic |
 | `/stop` | Stop current message and discard queued messages |
 | `/interrupt` | Interrupt current message, queued messages continue |
-| `/stop_all` | Kill everything — all messages, sessions, tasks, all agents |
+| `/stop_all` | Kill everything — all messages, named sessions, all agents |
 | `/status` | Session/provider/auth status |
 | `/memory` | Show persistent memory |
 | `/session <prompt>` | Start a named background session |
 | `/sessions` | View/manage active sessions |
-| `/tasks` | View/manage background tasks |
 | `/cron` | Interactive cron management |
 | `/showfiles` | Browse `~/.ductor/` |
 | `/diagnose` | Runtime diagnostics |
@@ -446,7 +428,6 @@ the bundled agent tool scripts.
   config/config.json                 # Bot configuration
   sessions.json                      # Chat session state
   named_sessions.json                # Named background sessions
-  tasks.json                         # Background task registry
   cron_jobs.json                     # Scheduled tasks
   webhooks.json                      # Webhook definitions
   agents.json                        # Sub-agent registry (optional)
@@ -456,7 +437,6 @@ the bundled agent tool scripts.
   workspace/
     memory_system/MAINMEMORY.md      # Persistent memory
     cron_tasks/ skills/ tools/       # Scripts and tools
-    tasks/                           # Per-task folders
     telegram_files/ matrix_files/    # Media files (per transport)
     api_files/                       # Uploaded/downloadable API files
     output_to_user/                  # Generated deliverables

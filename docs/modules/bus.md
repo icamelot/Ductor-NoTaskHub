@@ -1,6 +1,6 @@
 # bus/
 
-Unified result-delivery layer for observers, async inter-agent responses, and task callbacks.
+Unified result-delivery layer for observers and async inter-agent responses.
 
 ## Files
 
@@ -69,15 +69,7 @@ Cascading fallback for UNICAST:
 - `from_webhook_cron_result(...)`
 - `from_webhook_wake(...)`
 - `from_interagent_result(...)`
-- `from_task_result(...)`
-- `from_task_question(...)`
 - `from_user_message(...)` (audit-only envelope)
-
-Task/topic nuance:
-
-- task result envelopes map `thread_id -> topic_id`
-- task question envelopes also carry `topic_id`
-- injected responses route back into the originating forum topic session
 
 ## Wiring
 

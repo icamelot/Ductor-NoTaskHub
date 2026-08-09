@@ -32,7 +32,6 @@ Runtime supervision model:
 - `/reset` resets the currently active provider bucket.
 - `/stop` aborts local active work and drains pending queue.
 - `/stop_all` on main agent aborts active work across all agents (sub-agent fallback is local-only).
-- `/tasks` opens delegated background-task management for the current chat.
 - Startup classifies lifecycle as `first_start`, `service_restart`, `system_reboot` using `startup_state.json`.
 - Foreground in-flight turns are persisted in `inflight_turns.json` and used for startup recovery planning.
 - Named sessions persisted as `running` are downgraded to `idle` on startup and can be safely resumed by recovery logic.
@@ -41,11 +40,10 @@ Timeout behavior (current implementation):
 
 - Foreground chat flow: `config.timeouts.normal`
 - Named background `/session`: `config.timeouts.background`
-- Delegated background tasks: `config.tasks.timeout_seconds`
 - Cron/webhook `cron_task` + inter-agent: `config.cli_timeout`
 - Stale process cleanup threshold: `config.cli_timeout * 2`
 
-`TimeoutController` is wired in foreground/named-session/heartbeat flows; cron/webhook/inter-agent/task-injection paths still use plain `timeout_seconds`.
+`TimeoutController` is wired in foreground/named-session/heartbeat flows; cron/webhook/inter-agent paths still use plain `timeout_seconds`.
 
 ## Persistent State (Main Home)
 
@@ -54,7 +52,6 @@ Timeout behavior (current implementation):
 - `config/config.json`
 - `sessions.json`
 - `named_sessions.json`
-- `tasks.json`
 - `startup_state.json`
 - `inflight_turns.json`
 - `cron_jobs.json`
@@ -78,7 +75,6 @@ Sub-agent homes live under `~/.ductor/agents/<name>/` with their own config/sess
 ## Automation Systems
 
 - Named background sessions (`/session`)
-- Delegated background tasks (`TaskHub`, `/tasks`, `/tasks/*` internal API routes)
 - Cron scheduler (`cron_jobs.json`)
 - Webhook ingress (`webhooks.json`, modes: `wake`, `cron_task`)
 - Heartbeat observer
@@ -120,7 +116,6 @@ Module-level references:
 - [cli](https://github.com/PleasePrompto/ductor/blob/main/docs/modules/cli.md)
 - [session](https://github.com/PleasePrompto/ductor/blob/main/docs/modules/session.md)
 - [background](https://github.com/PleasePrompto/ductor/blob/main/docs/modules/background.md)
-- [tasks](https://github.com/PleasePrompto/ductor/blob/main/docs/modules/tasks.md)
 - [cron](https://github.com/PleasePrompto/ductor/blob/main/docs/modules/cron.md)
 - [webhook](https://github.com/PleasePrompto/ductor/blob/main/docs/modules/webhook.md)
 - [heartbeat](https://github.com/PleasePrompto/ductor/blob/main/docs/modules/heartbeat.md)

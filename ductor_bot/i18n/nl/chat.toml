@@ -113,7 +113,7 @@ session_line = "Sessie: `{sid}`"
 messages_line = "Berichten: {count}"
 tokens_line = "Tokens: {tokens}"
 cost_line = "Kosten: ${cost}"
-bg_header = "Achtergrondtaken: {count} actief"
+bg_header = "Benoemde sessies: {count} actief"
 auth_header = "Auth:"
 agents_header = "Agents:"
 
@@ -153,43 +153,13 @@ codex_cache_not_loaded = "Codex Model Cache: Niet geladen"
 codex_cache_info = "Codex Model Cache:\n  Laatst bijgewerkt: {updated}\n  Modellen in cache: {count}\n  Standaardmodel: {default}"
 health_header = "**Multi-Agent gezondheid:**"
 
-# -- Taken -------------------------------------------------------------------------
-
-[tasks]
-header = "**Achtergrondtaken**"
-disabled = "Takensysteem is niet ingeschakeld."
-empty = "Geen achtergrondtaken."
-hint = "Taken worden door de agent aangemaakt voor langlopend werk."
-too_many = "Te veel achtergrondtaken ({max} maximaal)"
-internal_error = "Interne fout (logs controleren)"
-
-cancelled_one = "{count} taak geannuleerd."
-cancelled_other = "{count} taken geannuleerd."
-no_running = "Geen lopende taken."
-task_cancelled = "Taak `{id}` geannuleerd."
-task_not_running = "Taak `{id}` draait niet."
-cleaned_one = "{count} voltooide taak verwijderd."
-cleaned_other = "{count} voltooide taken verwijderd."
-nothing_to_clean = "Niets op te ruimen."
-
-running_header = "**Actief**"
-waiting_header = "**Wacht op antwoord**"
-finished_header = "**Voltooid**"
-
-btn_cancel = "{name} annuleren"
-btn_cancel_all = "Alles annuleren"
-btn_refresh = "Vernieuwen"
-btn_delete_finished = "Voltooide verwijderen"
-
-summary_running = "Actief: {count}"
-summary_waiting = "Wachtend: {count}"
-summary_finished = "Voltooid: {count}"
-
 # -- Sessieselector ----------------------------------------------------------------
 
 [sessions]
 header = "**Sessies**"
 empty = "Geen actieve sessies."
+too_many = "Te veel benoemde sessies ({max} maximaal)"
+internal_error = "Interne fout (logs controleren)"
 start_hint = "Start er een met `/session <prompt>`."
 followup_hint = "Opvolgen: `@<naam> <bericht>`"
 active_count = "Actief: {count}"

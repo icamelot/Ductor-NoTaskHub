@@ -2,13 +2,12 @@
 
 Public API::
 
-    from ductor_bot.i18n import init, t, t_rich, t_cmd, t_plural
+    from ductor_bot.i18n import init, t, t_rich, t_cmd
 
     init("de")  # once at startup
     t("session.error", model="opus")  # chat/Markdown string
     t_rich("lifecycle.stopped")  # CLI/Rich string
     t_cmd("new")  # bot command description
-    t_plural("tasks.cancelled", 3)  # plural-aware (count is auto-bound)
 """
 
 from __future__ import annotations
@@ -65,9 +64,3 @@ def t_rich(key: str, **kwargs: object) -> str:
 def t_cmd(key: str) -> str:
     """Translate a bot command description."""
     return _get_store().cmd(key)
-
-
-def t_plural(key: str, count: int, **kwargs: object) -> str:
-    """Translate with simple plural rules (_one / _other suffix)."""
-    suffix = "_one" if count == 1 else "_other"
-    return t(f"{key}{suffix}", count=count, **kwargs)

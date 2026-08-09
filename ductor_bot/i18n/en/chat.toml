@@ -114,7 +114,7 @@ session_line = "Session: `{sid}`"
 messages_line = "Messages: {count}"
 tokens_line = "Tokens: {tokens}"
 cost_line = "Cost: ${cost}"
-bg_header = "Background tasks: {count} running"
+bg_header = "Named sessions: {count} running"
 auth_header = "Auth:"
 agents_header = "Agents:"
 
@@ -154,43 +154,13 @@ codex_cache_not_loaded = "Codex Model Cache: Not loaded"
 codex_cache_info = "Codex Model Cache:\n  Last updated: {updated}\n  Models cached: {count}\n  Default model: {default}"
 health_header = "**Multi-Agent Health:**"
 
-# -- Tasks ---------------------------------------------------------------------
-
-[tasks]
-header = "**Background Tasks**"
-disabled = "Task system is not enabled."
-empty = "No background tasks."
-hint = "Tasks are created by the agent for long-running work."
-too_many = "Too many background tasks ({max} max)"
-internal_error = "Internal error (check logs)"
-
-cancelled_one = "Cancelled {count} task."
-cancelled_other = "Cancelled {count} tasks."
-no_running = "No running tasks."
-task_cancelled = "Task `{id}` cancelled."
-task_not_running = "Task `{id}` not running."
-cleaned_one = "Removed {count} finished task."
-cleaned_other = "Removed {count} finished tasks."
-nothing_to_clean = "Nothing to clean up."
-
-running_header = "**Running**"
-waiting_header = "**Waiting for answer**"
-finished_header = "**Finished**"
-
-btn_cancel = "Cancel {name}"
-btn_cancel_all = "Cancel All"
-btn_refresh = "Refresh"
-btn_delete_finished = "Delete Finished"
-
-summary_running = "Running: {count}"
-summary_waiting = "Waiting: {count}"
-summary_finished = "Finished: {count}"
-
 # -- Sessions selector ---------------------------------------------------------
 
 [sessions]
 header = "**Sessions**"
 empty = "No active sessions."
+too_many = "Too many named sessions ({max} max)"
+internal_error = "Internal error (check logs)"
 start_hint = "Start one with `/session <prompt>`."
 followup_hint = "Follow up: `@<name> <message>`"
 active_count = "Active: {count}"

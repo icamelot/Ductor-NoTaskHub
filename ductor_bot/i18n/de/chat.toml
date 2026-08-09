@@ -113,7 +113,7 @@ session_line = "Session: `{sid}`"
 messages_line = "Nachrichten: {count}"
 tokens_line = "Tokens: {tokens}"
 cost_line = "Kosten: ${cost}"
-bg_header = "Hintergrund-Aufgaben: {count} laufend"
+bg_header = "Benannte Sessions: {count} laufend"
 auth_header = "Auth:"
 agents_header = "Agents:"
 
@@ -153,43 +153,13 @@ codex_cache_not_loaded = "Codex Model Cache: Nicht geladen"
 codex_cache_info = "Codex Model Cache:\n  Zuletzt aktualisiert: {updated}\n  Modelle im Cache: {count}\n  Standard-Modell: {default}"
 health_header = "**Multi-Agent Gesundheit:**"
 
-# -- Aufgaben ------------------------------------------------------------------
-
-[tasks]
-header = "**Hintergrund-Aufgaben**"
-disabled = "Aufgabensystem ist nicht aktiviert."
-empty = "Keine Hintergrund-Aufgaben."
-hint = "Aufgaben werden vom Agent für länger laufende Arbeit erstellt."
-too_many = "Zu viele Hintergrund-Aufgaben ({max} Maximum)"
-internal_error = "Interner Fehler (Logs prüfen)"
-
-cancelled_one = "{count} Aufgabe abgebrochen."
-cancelled_other = "{count} Aufgaben abgebrochen."
-no_running = "Keine laufenden Aufgaben."
-task_cancelled = "Aufgabe `{id}` abgebrochen."
-task_not_running = "Aufgabe `{id}` läuft nicht."
-cleaned_one = "{count} erledigte Aufgabe entfernt."
-cleaned_other = "{count} erledigte Aufgaben entfernt."
-nothing_to_clean = "Nichts aufzuräumen."
-
-running_header = "**Laufend**"
-waiting_header = "**Wartet auf Antwort**"
-finished_header = "**Fertig**"
-
-btn_cancel = "{name} abbrechen"
-btn_cancel_all = "Alle abbrechen"
-btn_refresh = "Aktualisieren"
-btn_delete_finished = "Erledigte löschen"
-
-summary_running = "Laufend: {count}"
-summary_waiting = "Wartend: {count}"
-summary_finished = "Fertig: {count}"
-
 # -- Sessions-Selektor --------------------------------------------------------
 
 [sessions]
 header = "**Sessions**"
 empty = "Keine aktiven Sessions."
+too_many = "Zu viele benannte Sessions ({max} Maximum)"
+internal_error = "Interner Fehler (Logs prüfen)"
 start_hint = "Starte eine mit `/session <Prompt>`."
 followup_hint = "Nachfassen: `@<Name> <Nachricht>`"
 active_count = "Aktiv: {count}"

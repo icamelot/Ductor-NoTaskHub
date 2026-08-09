@@ -233,10 +233,7 @@ Each provider's cache observer is created only when the startup auth detection r
 - `has_active(chat_id, topic_id=None)`: when `topic_id` is given, only processes for that specific topic are considered active; otherwise any process for the chat qualifies
 - abort markers (`was_aborted`, `clear_abort`)
 - `kill_all(chat_id)`
-- `kill_for_task(task_id)` for background-task cancellation
 - stale wall-clock cleanup (`kill_stale`)
-
-`TaskHub` uses `kill_for_task(task_id)` before cancelling the asyncio task so streaming subprocess pipes unblock cleanly.
 
 Windows uses process-tree termination (`taskkill /F /T`) to avoid orphaned child processes.
 

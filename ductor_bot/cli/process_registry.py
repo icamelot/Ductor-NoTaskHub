@@ -17,8 +17,8 @@ from ductor_bot.infra.process_tree import (
 logger = logging.getLogger(__name__)
 
 _SIGTERM_GRACE_SECONDS = 2.0
-_PRESERVED_LABEL_PREFIXES: tuple[str, ...] = ("task:", "task_result:", "ns:")
-# Lifecycle for these subprocesses is owned by /tasks, /sessions, or TaskHub.cancel().
+_PRESERVED_LABEL_PREFIXES: tuple[str, ...] = ("ns:",)
+# Named-session subprocess lifecycle is owned by /sessions.
 
 
 @dataclass(slots=True)
@@ -41,8 +41,8 @@ class ProcessRegistry:
         self._aborted_topics: set[tuple[int, int | None]] = set()
         self._aborted_labels: set[tuple[int, str]] = set()
         self._interrupted: set[int] = set()
-        # MED #9: serialize bulk kill operations (kill_for_task / kill_stale /
-        # kill_by_label) against each other so a concurrent ``register`` that
+        # Serialize bulk kill operations (kill_stale / kill_by_label) against
+        # each other so a concurrent ``register`` that
         # slips in mid-iteration can't orphan subprocesses past a cancel.
         # ``register`` itself stays lock-free — a single dict.setdefault()+
         # list.append() pair is atomic under the GIL.
@@ -59,9 +59,9 @@ class ProcessRegistry:
         """Register a subprocess. Returns the tracking handle.
 
         Lock-free on purpose: ``dict.setdefault`` + ``list.append`` is atomic
-        under the GIL. Bulk kill operations (:meth:`kill_for_task`,
-        :meth:`kill_stale`, :meth:`kill_by_label`) serialize against each
-        other via :attr:`_kill_lock`, which is sufficient — a register that
+        under the GIL. Bulk kill operations (:meth:`kill_stale` and
+        :meth:`kill_by_label`) serialize against each other via
+        :attr:`_kill_lock`, which is sufficient — a register that
         happens between two kills simply belongs to the next cancel round.
         """
         tracked = TrackedProcess(
@@ -111,7 +111,7 @@ class ProcessRegistry:
         Used by ``/stop`` so a stop in one topic does not affect another
         topic in the same chat. ``topic_id=None`` matches processes
         registered without a topic (e.g. private chats). Labels owned by
-        /tasks, /sessions, or TaskHub.cancel() are preserved.
+        /sessions are preserved.
         """
         async with self._kill_lock:
             entries = self._processes.get(chat_id, [])
@@ -245,34 +245,6 @@ class ProcessRegistry:
                 return 0
             killed = await _kill_processes(stale)
             for tracked in stale:
-                self.unregister(tracked)
-            return killed
-
-    async def kill_for_task(self, task_id: str) -> int:
-        """Kill any tracked process labelled ``f'task:{task_id}'``. Returns count killed.
-
-        Mirrors :meth:`kill_stale` semantics but filters by label. Uses the
-        SIGTERM → 2s → SIGKILL ladder via :func:`_kill_processes`. Already-exited
-        processes are skipped (``returncode is not None``). Each killed entry is
-        unregistered after the ladder completes.
-
-        MED #9: the collect → kill → unregister sequence runs under
-        :attr:`_kill_lock` so a subprocess that registers mid-iteration
-        cannot slip past the cancel. ``register`` remains lock-free.
-        """
-        label = f"task:{task_id}"
-        async with self._kill_lock:
-            targets: list[TrackedProcess] = []
-            for entries in self._processes.values():
-                for tracked in entries:
-                    if tracked.process.returncode is not None:
-                        continue
-                    if tracked.label == label:
-                        targets.append(tracked)
-            if not targets:
-                return 0
-            killed = await _kill_processes(targets)
-            for tracked in targets:
                 self.unregister(tracked)
             return killed
 

@@ -51,6 +51,15 @@ def test_old_config_loads_with_new_defaults(tmp_path: Path) -> None:
     assert config.cli_parameters.codex == []
 
 
+def test_agent_config_ignores_removed_tasks_section() -> None:
+    config = AgentConfig.model_validate(
+        {"provider": "codex", "tasks": {"enabled": True, "max_parallel": 99}}
+    )
+
+    assert config.provider == "codex"
+    assert not hasattr(config, "tasks")
+
+
 def test_partial_cli_parameters_gets_completed(tmp_path: Path) -> None:
     """Config with only partial cli_parameters should be completed."""
     config_path = tmp_path / "config.json"

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from ductor_bot.cli._log_redact import redact_cmd_for_log
 from ductor_bot.cli.stream_events import StreamEvent
-from ductor_bot.cli.types import CLIResponse, task_id_from_label
+from ductor_bot.cli.types import CLIResponse
 
 if TYPE_CHECKING:
     from ductor_bot.cli.process_registry import ProcessRegistry
@@ -167,8 +167,6 @@ def _docker_env_flags(
     ]
     if config.topic_id:
         env_flags += ["-e", f"DUCTOR_TOPIC_ID={config.topic_id}"]
-    if task_id := task_id_from_label(config.process_label):
-        env_flags += ["-e", f"DUCTOR_TASK_ID={task_id}"]
     if config.transcribe_command:
         env_flags += ["-e", f"DUCTOR_TRANSCRIBE_COMMAND={config.transcribe_command}"]
     if config.video_transcribe_command:

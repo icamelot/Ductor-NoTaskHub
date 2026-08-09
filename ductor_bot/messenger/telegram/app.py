@@ -87,7 +87,6 @@ from ductor_bot.messenger.telegram.welcome import (
 )
 from ductor_bot.multiagent.bus import AsyncInterAgentResult
 from ductor_bot.session.key import SessionKey
-from ductor_bot.tasks.models import TaskResult
 from ductor_bot.text.response_format import SEP, fmt
 from ductor_bot.workspace.paths import DuctorPaths
 
@@ -137,7 +136,7 @@ def _build_help_text() -> str:
         f"{t('help.cat_daily')}\n{_help_line('new')}\n{_help_line('reset')}\n{_help_line('stop')}\n"
         f"{_help_line('interrupt')}\n{_help_line('stop_all')}\n"
         f"{_help_line('model')}\n{_help_line('effort')}\n{_help_line('status')}\n{_help_line('memory')}",
-        f"{t('help.cat_automation')}\n{_help_line('session')}\n{_help_line('tasks')}\n{_help_line('cron')}",
+        f"{t('help.cat_automation')}\n{_help_line('session')}\n{_help_line('cron')}",
         f"{t('help.cat_multiagent')}\n{_help_line('agent_commands')}",
         f"{t('help.cat_browse')}\n{_help_line('where')}\n{_help_line('leave')}\n"
         f"{_help_line('showfiles')}\n{_help_line('info')}\n{_help_line('help')}",
@@ -402,7 +401,6 @@ class TelegramBot:
         r.message(Command("new", ignore_case=True))(self._on_new)
         r.message(Command("session", ignore_case=True))(self._on_session)
         r.message(Command("sessions", ignore_case=True))(self._on_sessions)
-        r.message(Command("tasks", ignore_case=True))(self._on_tasks)
         r.message(Command("showfiles", ignore_case=True))(self._on_showfiles)
         r.message(Command("agent_commands", ignore_case=True))(self._on_agent_commands)
         base_cmds = ["status", "memory", "model", "effort", "cron", "diagnose", "upgrade", "reset"]
@@ -904,7 +902,7 @@ class TelegramBot:
         if direct is not None or self._orchestrator is None:
             return direct or False
 
-        if text_lower.startswith(("/sessions", "/tasks")):
+        if text_lower.startswith("/sessions"):
             await handle_command(self._orchestrator, self._bot, message)
             return True
 
@@ -1135,12 +1133,6 @@ class TelegramBot:
             return
         await handle_command(self._orch, self._bot, message)
 
-    async def _on_tasks(self, message: Message) -> None:
-        """Handle /tasks: show background task management UI."""
-        if self._config.group_mention_only and not self._is_addressed(message):
-            return
-        await handle_command(self._orch, self._bot, message)
-
     async def _on_restart(self, message: Message) -> None:
         if self._config.group_mention_only and not self._is_addressed(message):
             return
@@ -1246,14 +1238,9 @@ class TelegramBot:
             return True
 
         from ductor_bot.orchestrator.selectors.session_selector import is_session_selector_callback
-        from ductor_bot.orchestrator.selectors.task_selector import is_task_selector_callback
 
         if is_session_selector_callback(data):
             await self._handle_session_selector(chat_id, message_id, data)
-            return True
-
-        if is_task_selector_callback(data):
-            await self._handle_task_selector(chat_id, message_id, data)
             return True
 
         if data.startswith("ns:"):
@@ -1284,16 +1271,6 @@ class TelegramBot:
 
         async with self._sequential.get_lock(chat_id):
             resp = await handle_session_callback(self._orch, chat_id, data)
-        await edit_selector_response(self._bot, chat_id, message_id, resp)
-
-    async def _handle_task_selector(self, chat_id: int, message_id: int, data: str) -> None:
-        """Handle task selector wizard by editing the message in-place."""
-        from ductor_bot.orchestrator.selectors.task_selector import handle_task_callback
-
-        hub = self._orch.task_hub
-        if hub is None:
-            return
-        resp = await handle_task_callback(hub, chat_id, data)
         await edit_selector_response(self._bot, chat_id, message_id, resp)
 
     async def _handle_ns_callback(
@@ -1523,40 +1500,6 @@ class TelegramBot:
                 injection_prompt=injection_prompt,
                 transport="tg",
             )
-        )
-
-    async def on_task_result(self, result: TaskResult) -> None:
-        """Handle background task result via the message bus."""
-        from ductor_bot.bus.adapters import from_task_result
-
-        chat_id = result.chat_id
-        if not chat_id:
-            chat_id = self._config.allowed_user_ids[0] if self._config.allowed_user_ids else 0
-        if not chat_id:
-            logger.warning("No chat_id for task result delivery (task=%s)", result.task_id)
-            return
-        set_log_context(operation="task", chat_id=chat_id)
-        await self._bus.submit(from_task_result(result))
-
-    async def on_task_question(
-        self,
-        task_id: str,
-        question: str,
-        prompt_preview: str,
-        chat_id: int,
-        thread_id: int | None = None,
-    ) -> None:
-        """Deliver a background task question via the message bus."""
-        from ductor_bot.bus.adapters import from_task_question
-
-        if not chat_id:
-            chat_id = self._config.allowed_user_ids[0] if self._config.allowed_user_ids else 0
-        if not chat_id:
-            logger.warning("No chat_id for task question delivery (task=%s)", task_id)
-            return
-        set_log_context(operation="task", chat_id=chat_id)
-        await self._bus.submit(
-            from_task_question(task_id, question, prompt_preview, chat_id, topic_id=thread_id)
         )
 
     async def _handle_webhook_wake(self, chat_id: int, prompt: str) -> str | None:

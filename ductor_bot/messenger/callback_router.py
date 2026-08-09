@@ -42,8 +42,6 @@ async def route_callback(
     * ``ms:`` -- model selector
     * ``crn:`` -- cron selector
     * ``nsc:`` -- session selector
-    * ``tsc:`` -- task selector
-
     Transport-specific prefixes (returned as ``handled=False``):
 
     * ``upg:`` -- upgrade flow
@@ -66,10 +64,6 @@ async def route_callback(
         handle_session_callback,
         is_session_selector_callback,
     )
-    from ductor_bot.orchestrator.selectors.task_selector import (
-        handle_task_callback,
-        is_task_selector_callback,
-    )
 
     if is_model_selector_callback(callback_data):
         resp = await handle_model_callback(orch, key, callback_data)
@@ -81,13 +75,6 @@ async def route_callback(
 
     if is_session_selector_callback(callback_data):
         resp = await handle_session_callback(orch, key.chat_id, callback_data)
-        return CallbackResult(text=resp.text, buttons=resp.buttons)
-
-    if is_task_selector_callback(callback_data):
-        hub = orch.task_hub
-        if hub is None:
-            return CallbackResult(text="Task system not available.", buttons=None)
-        resp = await handle_task_callback(hub, key.chat_id, callback_data)
         return CallbackResult(text=resp.text, buttons=resp.buttons)
 
     # Transport-specific prefixes -- signal the caller to handle them.

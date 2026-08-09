@@ -60,3 +60,6 @@ class TestCommandSetIntegrity:
             assert result != "unknown", (
                 f"MULTIAGENT_SUB_COMMANDS entry {cmd_name!r} is not classified"
             )
+
+    def test_removed_background_command_is_not_classified(self) -> None:
+        assert "tasks" not in ORCHESTRATOR_COMMANDS

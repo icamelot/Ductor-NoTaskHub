@@ -41,13 +41,12 @@ Important runtime nuance:
 - transport/auth: `transport`, `transports`, `telegram_token`, `matrix`
 - runtime topology: `docker`, `api`, `webhooks`, `interagent_port`
 - environment/core: `ductor_home`, `log_level`, `gemini_api_key`, `update_check`
-- timeout/task policy: `timeouts`, `tasks`
+- timeout policy: `timeouts`
 - classification is schema-based over `AgentConfig` top-level fields: any changed top-level field not in the hot-reloadable set is reported as restart-required.
 
 Timeout note:
 
 - `timeouts.*` updates currently require restart.
-- `tasks.*` updates currently require restart.
 - runtime hot-reload still applies `cli_timeout` changes immediately.
 
 ## Wiring

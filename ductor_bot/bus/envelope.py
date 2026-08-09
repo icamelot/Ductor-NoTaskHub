@@ -17,8 +17,6 @@ class Origin(enum.Enum):
     WEBHOOK_CRON = "webhook_cron"
     HEARTBEAT = "heartbeat"
     INTERAGENT = "interagent"
-    TASK_RESULT = "task_result"
-    TASK_QUESTION = "task_question"
     USER = "user"
     API = "api"
 
@@ -42,7 +40,7 @@ class Envelope:
     """Unified container for all message routing.
 
     Every background result, cron output, webhook response, heartbeat alert,
-    inter-agent message, and task result is wrapped in an Envelope before
+    and inter-agent message is wrapped in an Envelope before
     being submitted to the :class:`MessageBus`.
     """
 

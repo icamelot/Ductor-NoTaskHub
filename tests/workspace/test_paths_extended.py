@@ -40,3 +40,9 @@ def test_config_example_path(tmp_path: Path) -> None:
 def test_home_defaults_path(tmp_path: Path) -> None:
     p = _paths(tmp_path)
     assert p.home_defaults == tmp_path / "fw" / "workspace"
+
+
+def test_legacy_background_paths_are_not_exposed(tmp_path: Path) -> None:
+    p = _paths(tmp_path)
+    assert not hasattr(p, "tasks_dir")
+    assert not hasattr(p, "tasks_registry_path")

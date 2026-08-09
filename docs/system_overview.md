@@ -11,7 +11,6 @@ One Python process hosts:
 - shared `AgentSupervisor`
 - shared `InterAgentBus`
 - shared internal HTTP bridge (`InternalAgentAPI`, default port `8799`, configurable via `interagent_port`)
-- shared `TaskHub` when `tasks.enabled=true`
 
 Each agent stack contains:
 
@@ -67,7 +66,7 @@ This keeps cross-transport and topic/channel conversations isolated while stayin
 
 Observers run in-process (cron, webhook, heartbeat, cleanup, background sessions, model caches, config watcher, rule/skill sync).
 
-All observer/task/inter-agent results now flow through `bus/`:
+All observer and inter-agent results now flow through `bus/`:
 
 - wrap to `Envelope` (`bus/adapters.py`)
 - route via `MessageBus`
@@ -107,21 +106,12 @@ HTTP endpoints:
 - `/interagent/send_async`
 - `/interagent/agents`
 - `/interagent/health`
-- `/tasks/create`
-- `/tasks/resume`
-- `/tasks/ask_parent`
-- `/tasks/list`
-- `/tasks/cancel`
-- `/tasks/delete`
-
-Ownership checks are enforced for resume/cancel/delete when `from=<agent>` is supplied.
 
 ## 7) Key runtime files (`~/.ductor`)
 
 - `config/config.json`
 - `sessions.json`
 - `named_sessions.json`
-- `tasks.json`
 - `chat_activity.json`
 - `cron_jobs.json`
 - `webhooks.json`
@@ -130,7 +120,7 @@ Ownership checks are enforced for resume/cancel/delete when `from=<agent>` is su
 - `inflight_turns.json`
 - `SHAREDMEMORY.md`
 - `logs/agent.log`
-- `workspace/` (rules, tools, files, tasks, cron_tasks, skills)
+- `workspace/` (rules, tools, files, cron_tasks, skills)
 
 Sub-agent home: `~/.ductor/agents/<name>/` with its own config/workspace/session files.
 
@@ -142,14 +132,13 @@ Sub-agent home: `~/.ductor/agents/<name>/` with its own config/workspace/session
 4. `ductor_bot/messenger/telegram/app.py` + `messenger/telegram/startup.py` (Telegram), `ductor_bot/messenger/matrix/bot.py` (Matrix)
 5. `ductor_bot/orchestrator/core.py` + `orchestrator/lifecycle.py`
 6. `ductor_bot/bus/*` (unified delivery/injection)
-7. `ductor_bot/tasks/hub.py` + `tasks/registry.py`
-8. `ductor_bot/cli/service.py` and provider wrappers
+7. `ductor_bot/cli/service.py` and provider wrappers
 
 ## 9) Command surface (high level)
 
 Chat commands (Telegram and Matrix):
 
-- `/new`, `/reset`, `/stop`, `/stop_all`, `/interrupt`, `/model`, `/status`, `/memory`, `/session`, `/sessions`, `/tasks`, `/cron`, `/showfiles`, `/info`, `/help`, `/diagnose`, `/upgrade`
+- `/new`, `/reset`, `/stop`, `/stop_all`, `/interrupt`, `/model`, `/status`, `/memory`, `/session`, `/sessions`, `/cron`, `/showfiles`, `/info`, `/help`, `/diagnose`, `/upgrade`
 - Telegram-only utility commands: `/where`, `/leave` (work but are not in command popup)
 - Matrix uses `!` prefix by default (e.g. `!help`, `!status`); `/` also works but may conflict with Element's built-in commands
 

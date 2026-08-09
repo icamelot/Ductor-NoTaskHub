@@ -15,7 +15,6 @@ This is the navigation index for workspace tools.
 - incoming HTTP triggers -> `webhook_tools/CLAUDE.md`
 - file/media processing -> `media_tools/CLAUDE.md`
 - sub-agent management (create/remove/list/ask) -> `agent_tools/CLAUDE.md`
-- background tasks (delegate, list, cancel) -> `task_tools/CLAUDE/GEMINI/AGENTS.md`
 - custom user scripts -> `user_tools/CLAUDE.md`
 
 ## External API Secrets

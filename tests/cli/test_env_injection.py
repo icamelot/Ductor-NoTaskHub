@@ -9,6 +9,9 @@ from ductor_bot.cli.base import CLIConfig, docker_wrap
 from ductor_bot.cli.executor import build_subprocess_env
 from ductor_bot.infra.env_secrets import clear_cache
 
+_REMOVED_ENV_PARTS = ("DUCTOR", "TASK", "ID")
+_REMOVED_TASK_ENV = "_".join(_REMOVED_ENV_PARTS)
+
 
 def test_subprocess_env_merges_secrets(tmp_path: Path) -> None:
     """Secrets from .env are merged into the subprocess env dict."""
@@ -53,21 +56,20 @@ def test_subprocess_env_works_without_env_file(tmp_path: Path) -> None:
     assert "DUCTOR_AGENT_NAME" in env
 
 
-def test_subprocess_env_sets_task_id_for_task_label(tmp_path: Path) -> None:
-    """Background-task labels (task:<id>) expose DUCTOR_TASK_ID to the subprocess."""
+def test_subprocess_env_never_injects_legacy_task_id(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    config = CLIConfig(working_dir=str(workspace), process_label="task:abc123")
+    config = CLIConfig(working_dir=str(workspace), process_label="task:legacy")
     clear_cache()
     env = build_subprocess_env(config)
 
     assert env is not None
-    assert env["DUCTOR_TASK_ID"] == "abc123"
+    assert _REMOVED_TASK_ENV not in env
 
 
 def test_subprocess_env_omits_task_id_for_other_labels(tmp_path: Path) -> None:
-    """Non-task labels (main, ns:*, interagent:*) must not leak DUCTOR_TASK_ID."""
+    """Non-task labels must not leak the removed task identifier variable."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
@@ -77,23 +79,22 @@ def test_subprocess_env_omits_task_id_for_other_labels(tmp_path: Path) -> None:
         env = build_subprocess_env(config)
 
         assert env is not None
-        assert "DUCTOR_TASK_ID" not in env
+        assert _REMOVED_TASK_ENV not in env
 
 
-def test_docker_wrap_sets_task_id_for_task_label(tmp_path: Path) -> None:
-    """Docker exec gets DUCTOR_TASK_ID as an -e flag for task labels."""
+def test_docker_wrap_never_injects_legacy_task_id(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
     config = CLIConfig(
         working_dir=str(workspace),
         docker_container="test-container",
-        process_label="task:abc123",
+        process_label="task:legacy",
     )
     clear_cache()
     cmd, _ = docker_wrap(["codex"], config)
 
-    assert "DUCTOR_TASK_ID=abc123" in cmd
+    assert not any(part.startswith(f"{_REMOVED_TASK_ENV}=") for part in cmd)
 
 
 def test_docker_wrap_injects_secrets(tmp_path: Path) -> None:

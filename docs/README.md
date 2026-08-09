@@ -15,9 +15,8 @@ ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`,
 9. `docs/modules/bot.md` -- Telegram transport (messenger/telegram/), middleware, topic routing.
 10. `docs/modules/bus.md` -- unified Envelope/MessageBus delivery architecture.
 11. `docs/modules/session.md` -- transport-aware `SessionKey(transport, chat_id, topic_id)` isolation model.
-12. `docs/modules/tasks.md` -- delegated task system (`TaskHub`) and `/tasks/*` API.
-13. `docs/modules/api.md` -- direct WebSocket ingress and HTTP file endpoints.
-14. `docs/modules/cli.md` -- provider wrappers, stream parsing, process control.
+12. `docs/modules/api.md` -- direct WebSocket ingress and HTTP file endpoints.
+13. `docs/modules/cli.md` -- provider wrappers, stream parsing, process control.
 15. `docs/modules/cli_commands.md` -- CLI command split from `__main__.py`.
 16. `docs/modules/workspace.md` -- `~/.ductor` seeding, rules sync, skill sync.
 17. `docs/modules/multiagent.md` -- supervisor, bus bridge, sub-agent runtime.
@@ -30,10 +29,9 @@ ductor routes chat input to official provider CLIs (`claude`, `codex`, `gemini`,
 - `ductor_bot/messenger/`: transport-agnostic protocols, capabilities, notifications, registry.
 - `ductor_bot/messenger/telegram/`: aiogram handlers, auth/sequencing middleware, streaming dispatch, callback routing, group audit/chat tracking.
 - `ductor_bot/messenger/matrix/`: matrix-nio handlers, segment streaming, reaction buttons, formatting.
-- `ductor_bot/orchestrator/`: command registry, directives/hooks, normal + streaming + heartbeat flows, provider/session/task wiring.
+- `ductor_bot/orchestrator/`: command registry, directives/hooks, normal + streaming + heartbeat flows, provider/session wiring.
 - `ductor_bot/bus/`: central `MessageBus` + `Envelope` + `LockPool`.
 - `ductor_bot/session/`: provider-isolated session state keyed by `SessionKey(transport, chat_id, topic_id)` plus named-session registry.
-- `ductor_bot/tasks/`: shared background task delegation (`TaskHub`) and persistent task registry.
 - `ductor_bot/api/`: WebSocket ingress (`/ws`) and HTTP file endpoints (`/files`, `/upload`).
 - `ductor_bot/cli/`: Claude/Codex/Gemini/Antigravity wrappers, stream-event normalization, auth checks, model caches, process registry.
 - `ductor_bot/cron/`, `webhook/`, `heartbeat/`, `cleanup/`: in-process automation observers.
@@ -71,7 +69,6 @@ Runtime behavior notes:
   - [bus](modules/bus.md)
   - [background](modules/background.md)
   - [session](modules/session.md)
-  - [tasks](modules/tasks.md)
   - [api](modules/api.md)
   - [files](modules/files.md)
   - [text](modules/text.md)

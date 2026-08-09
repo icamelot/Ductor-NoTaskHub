@@ -43,6 +43,9 @@ class TestSupervisorInit:
         assert supervisor.health == {}
         assert supervisor.bus is None
         assert supervisor._running is False
+        removed_attr_parts = ("_task", "_hub")
+        assert not hasattr(supervisor, "".join(removed_attr_parts))
+        assert not hasattr(supervisor, "_task_process_registry")
 
     def test_agents_path(self, supervisor: AgentSupervisor, tmp_path: Path) -> None:
         assert supervisor._agents_path == tmp_path / "agents.json"
@@ -63,6 +66,25 @@ class TestStartupFailures:
             ),
             patch("ductor_bot.multiagent.supervisor.AgentStack.create", new_callable=AsyncMock),
             pytest.raises(RuntimeError, match="Internal agent API failed to start"),
+        ):
+            await supervisor.start()
+
+    async def test_start_reaches_agent_creation(
+        self,
+        supervisor: AgentSupervisor,
+    ) -> None:
+        with (
+            patch(
+                "ductor_bot.multiagent.internal_api.InternalAgentAPI.start",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "ductor_bot.multiagent.supervisor.AgentStack.create",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("stop after startup wiring"),
+            ),
+            pytest.raises(RuntimeError, match="stop after startup wiring"),
         ):
             await supervisor.start()
 

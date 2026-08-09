@@ -40,8 +40,6 @@ Required surface:
 | `register_startup_hook(hook)` | method | Callback invoked after orchestrator creation |
 | `set_abort_all_callback(cb)` | method | Multi-agent abort injection point |
 | `on_async_interagent_result(result)` | async | Deliver async inter-agent result |
-| `on_task_result(result)` | async | Deliver background task completion |
-| `on_task_question(...)` | async | Deliver background task question |
 | `file_roots(paths)` | method | Allowed root directories for file sends |
 
 `TelegramBot`, `MatrixBot`, and `SlackBot` implement this protocol.
@@ -142,8 +140,6 @@ a single `BotProtocol` facade. It is returned by `create_bot()` when
 | `register_startup_hook` | primary |
 | `set_abort_all_callback` | all bots |
 | `on_async_interagent_result` | all bots |
-| `on_task_result` | all bots |
-| `on_task_question` | all bots |
 | `file_roots` | primary |
 | `shutdown` | all bots |
 

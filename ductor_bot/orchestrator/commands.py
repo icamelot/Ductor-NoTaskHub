@@ -19,7 +19,6 @@ from ductor_bot.orchestrator.selectors.model_selector import (
 )
 from ductor_bot.orchestrator.selectors.models import Button, ButtonGrid
 from ductor_bot.orchestrator.selectors.session_selector import session_selector_start
-from ductor_bot.orchestrator.selectors.task_selector import task_selector_start
 from ductor_bot.text.response_format import SEP, fmt, new_session_text
 from ductor_bot.workspace.loader import read_mainmemory
 
@@ -103,18 +102,6 @@ async def cmd_sessions(orch: Orchestrator, key: SessionKey, _text: str) -> Orche
     """Handle /sessions."""
     logger.info("Sessions requested")
     resp = await session_selector_start(orch, key.chat_id)
-    return OrchestratorResult(text=resp.text, buttons=resp.buttons)
-
-
-async def cmd_tasks(orch: Orchestrator, key: SessionKey, _text: str) -> OrchestratorResult:
-    """Handle /tasks."""
-    logger.info("Tasks requested")
-    hub = orch.task_hub
-    if hub is None:
-        return OrchestratorResult(
-            text=fmt(t("tasks.header"), SEP, t("tasks.disabled")),
-        )
-    resp = task_selector_start(hub, key.chat_id)
     return OrchestratorResult(text=resp.text, buttons=resp.buttons)
 
 

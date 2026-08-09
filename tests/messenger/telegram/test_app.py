@@ -302,6 +302,8 @@ class TestOnHelp:
         text = mock_send.call_args[0][2]
         for command, _desc in BOT_COMMANDS:
             assert f"/{command}" in text
+        removed_command = "tasks"
+        assert f"/{removed_command}" not in text
 
     @patch("ductor_bot.messenger.telegram.app.send_rich", new_callable=AsyncMock)
     async def test_help_passes_reply_to(self, mock_send: AsyncMock) -> None:
@@ -665,6 +667,19 @@ class TestHandleStreaming:
 
 
 class TestCallbackQueryHandler:
+    async def test_removed_callback_prefix_is_not_handled(self) -> None:
+        from ductor_bot.session.key import SessionKey
+
+        tg_bot, _ = _make_tg_bot()
+        tg_bot._orchestrator = _make_orchestrator()
+
+        removed_prefix = "tsc"
+        handled = await tg_bot._route_prefix_callback(
+            SessionKey.telegram(1), message_id=42, data=f"{removed_prefix}:r"
+        )
+
+        assert handled is False
+
     async def test_callback_answers_to_dismiss_spinner(self) -> None:
         tg_bot, _ = _make_tg_bot()
         tg_bot._orchestrator = _make_orchestrator()
