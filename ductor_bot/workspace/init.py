@@ -291,9 +291,54 @@ def _smart_merge_config(paths: DuctorPaths) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _has_symlink_component(root: Path, candidate: Path) -> bool:
+    """Return whether *candidate* traverses a symlink below *root*."""
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return True
+
+    current = root
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+_LEGACY_TASK_RULE_FILES = frozenset({"AGENTS.md", "CLAUDE.md", "GEMINI.md"})
+
+
+def _clean_legacy_task_rules(paths: DuctorPaths) -> None:
+    """Remove shipped TaskHub rules while preserving all task data."""
+    legacy_dir = paths.workspace / "tasks"
+    if _has_symlink_component(paths.ductor_home, legacy_dir) or not legacy_dir.is_dir():
+        return
+
+    for name in sorted(_LEGACY_TASK_RULE_FILES):
+        candidate = legacy_dir / name
+        try:
+            if candidate.exists() or candidate.is_symlink():
+                candidate.unlink()
+        except OSError as exc:
+            logger.warning("Failed to remove legacy background-task rule %s: %s", candidate, exc)
+
+    try:
+        if not any(legacy_dir.iterdir()):
+            legacy_dir.rmdir()
+    except OSError as exc:
+        logger.warning(
+            "Failed to remove empty legacy background-task directory %s: %s",
+            legacy_dir,
+            exc,
+        )
+
+
 _LEGACY_TASK_TOOL_FILES = frozenset(
     {
-        "RULES.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md",
         "_shared.py",
         "ask_parent.py",
         "cancel_task.py",
@@ -304,11 +349,53 @@ _LEGACY_TASK_TOOL_FILES = frozenset(
     }
 )
 
+_LEGACY_TASK_TOOL_MODULES = frozenset(
+    Path(name).stem for name in _LEGACY_TASK_TOOL_FILES if name.endswith(".py")
+)
+
+
+def _clean_legacy_task_tool_cache(legacy_dir: Path) -> None:
+    """Remove bytecode generated from shipped TaskHub tools only."""
+    cache_dir = legacy_dir / "__pycache__"
+    if cache_dir.is_symlink() or not cache_dir.is_dir():
+        return
+
+    try:
+        entries = list(cache_dir.iterdir())
+    except OSError as exc:
+        logger.warning("Failed to inspect legacy background-task tool cache %s: %s", cache_dir, exc)
+        return
+
+    for candidate in entries:
+        is_legacy_bytecode = candidate.suffix == ".pyc" and any(
+            candidate.name.startswith(f"{module}.") for module in _LEGACY_TASK_TOOL_MODULES
+        )
+        if not is_legacy_bytecode:
+            continue
+        try:
+            candidate.unlink()
+        except OSError as exc:
+            logger.warning(
+                "Failed to remove legacy background-task tool bytecode %s: %s",
+                candidate,
+                exc,
+            )
+
+    try:
+        if not any(cache_dir.iterdir()):
+            cache_dir.rmdir()
+    except OSError as exc:
+        logger.warning(
+            "Failed to remove legacy background-task tool cache directory %s: %s",
+            cache_dir,
+            exc,
+        )
+
 
 def _clean_legacy_task_tools(paths: DuctorPaths) -> None:
     """Remove shipped background-task tools while preserving user-owned files."""
     legacy_dir = paths.workspace / "tools" / "task_tools"
-    if not legacy_dir.is_dir():
+    if _has_symlink_component(paths.ductor_home, legacy_dir) or not legacy_dir.is_dir():
         return
 
     for name in sorted(_LEGACY_TASK_TOOL_FILES):
@@ -318,6 +405,8 @@ def _clean_legacy_task_tools(paths: DuctorPaths) -> None:
                 candidate.unlink()
         except OSError as exc:
             logger.warning("Failed to remove legacy background-task tool %s: %s", candidate, exc)
+
+    _clean_legacy_task_tool_cache(legacy_dir)
 
     try:
         if not any(legacy_dir.iterdir()):
@@ -375,6 +464,7 @@ def init_workspace(paths: DuctorPaths) -> None:
     sync_bundled_skills(paths)
     _sync_home_defaults(paths)
     _ensure_required_dirs(paths)
+    _clean_legacy_task_rules(paths)
     _clean_legacy_task_tools(paths)
 
     # Deploy provider-specific rule files based on CLI auth status

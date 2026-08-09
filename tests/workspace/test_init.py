@@ -416,6 +416,95 @@ def test_workspace_init_preserves_legacy_tasks_data(tmp_path: Path) -> None:
     assert data.read_text() == "user task data"
 
 
+def test_workspace_init_removes_legacy_task_rules_but_preserves_task_data(
+    tmp_path: Path,
+) -> None:
+    paths = _make_paths(tmp_path)
+    legacy = paths.workspace / "tasks"
+    task = legacy / "saved-task"
+    task.mkdir(parents=True)
+    memory = task / "TASKMEMORY.md"
+    memory.write_text("user task data")
+    for name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"):
+        (legacy / name).write_text("# Background Tasks Directory")
+
+    init_workspace(paths)
+
+    assert memory.read_text() == "user task data"
+    assert not any((legacy / name).exists() for name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"))
+
+
+def test_workspace_init_preserves_user_owned_rules_in_legacy_directories(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    tasks_rules = paths.workspace / "tasks" / "RULES.md"
+    tools_rules = paths.workspace / "tools" / "task_tools" / "RULES.md"
+    tasks_rules.parent.mkdir(parents=True)
+    tools_rules.parent.mkdir(parents=True)
+    tasks_rules.write_text("user task rules")
+    tools_rules.write_text("user tool rules")
+
+    init_workspace(paths)
+
+    assert tasks_rules.read_text() == "user task rules"
+    assert tools_rules.read_text() == "user tool rules"
+
+
+def test_workspace_init_does_not_follow_legacy_directory_symlinks(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    external_tasks = tmp_path / "external-tasks"
+    external_tools = tmp_path / "external-tools"
+    external_tasks.mkdir()
+    external_tools.mkdir()
+    task_rule = external_tasks / "AGENTS.md"
+    tool = external_tools / "create_task.py"
+    task_rule.write_text("external task rules")
+    tool.write_text("external tool")
+    paths.workspace.mkdir(parents=True)
+    paths.tools_dir.mkdir(parents=True)
+    (paths.workspace / "tasks").symlink_to(external_tasks, target_is_directory=True)
+    (paths.tools_dir / "task_tools").symlink_to(external_tools, target_is_directory=True)
+
+    init_workspace(paths)
+
+    assert task_rule.read_text() == "external task rules"
+    assert tool.read_text() == "external tool"
+
+
+def test_workspace_init_does_not_follow_symlinked_workspace_ancestor(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    external_workspace = tmp_path / "external-workspace"
+    tasks = external_workspace / "tasks"
+    tools = external_workspace / "tools" / "task_tools"
+    tasks.mkdir(parents=True)
+    tools.mkdir(parents=True)
+    task_rule = tasks / "AGENTS.md"
+    tool = tools / "create_task.py"
+    task_rule.write_text("external task rules")
+    tool.write_text("external tool")
+    paths.ductor_home.mkdir(parents=True)
+    paths.workspace.symlink_to(external_workspace, target_is_directory=True)
+
+    init_workspace(paths)
+
+    assert task_rule.read_text() == "external task rules"
+    assert tool.read_text() == "external tool"
+
+
+def test_workspace_init_does_not_follow_legacy_bytecode_cache_symlink(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    legacy = paths.workspace / "tools" / "task_tools"
+    external_cache = tmp_path / "external-cache"
+    legacy.mkdir(parents=True)
+    external_cache.mkdir()
+    bytecode = external_cache / "_shared.cpython-311.pyc"
+    bytecode.write_bytes(b"external bytecode")
+    (legacy / "__pycache__").symlink_to(external_cache, target_is_directory=True)
+
+    init_workspace(paths)
+
+    assert bytecode.read_bytes() == b"external bytecode"
+
+
 def test_workspace_init_removes_known_task_tools_but_preserves_unknown_file(
     tmp_path: Path,
 ) -> None:
@@ -432,11 +521,46 @@ def test_workspace_init_removes_known_task_tools_but_preserves_unknown_file(
     assert unknown.read_text() == "keep me"
 
 
+def test_workspace_init_removes_deployed_legacy_task_rule_mirrors(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    legacy = paths.workspace / "tools" / "task_tools"
+    legacy.mkdir(parents=True)
+    for name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"):
+        (legacy / name).write_text("# Background Tasks")
+
+    init_workspace(paths)
+
+    assert not legacy.exists()
+
+
+def test_workspace_init_removes_legacy_task_tool_bytecode_cache(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    cache = paths.workspace / "tools" / "task_tools" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "_shared.cpython-311.pyc").write_bytes(b"legacy bytecode")
+
+    init_workspace(paths)
+
+    assert not cache.parent.exists()
+
+
+def test_workspace_init_preserves_unknown_bytecode_in_legacy_tool_cache(tmp_path: Path) -> None:
+    paths = _make_paths(tmp_path)
+    cache = paths.workspace / "tools" / "task_tools" / "__pycache__"
+    cache.mkdir(parents=True)
+    unknown = cache / "user_tool.cpython-311.pyc"
+    unknown.write_bytes(b"user bytecode")
+
+    init_workspace(paths)
+
+    assert unknown.read_bytes() == b"user bytecode"
+
+
 def test_workspace_init_removes_empty_legacy_task_tools_directory(tmp_path: Path) -> None:
     paths = _make_paths(tmp_path)
     legacy = paths.workspace / "tools" / "task_tools"
     legacy.mkdir(parents=True)
-    (legacy / "RULES.md").write_text("legacy framework rules")
+    (legacy / "AGENTS.md").write_text("legacy framework rules")
 
     init_workspace(paths)
 
@@ -477,7 +601,7 @@ def test_workspace_init_warns_and_continues_when_legacy_directory_cannot_be_remo
     paths = _make_paths(tmp_path)
     legacy = paths.workspace / "tools" / "task_tools"
     legacy.mkdir(parents=True)
-    (legacy / "RULES.md").write_text("legacy framework rules")
+    (legacy / "AGENTS.md").write_text("legacy framework rules")
     original_rmdir = Path.rmdir
 
     def guarded_rmdir(path: Path) -> None:
