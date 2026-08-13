@@ -117,6 +117,8 @@ class MemoryFlusher:
             chat_id=key.chat_id,
             topic_id=key.topic_id,
             transport=key.transport,
+            provider_override=session.provider,
+            model_override=session.model,
             resume_session=session_id,
             process_label="memory_flush",
         )
@@ -146,6 +148,8 @@ class MemoryFlusher:
             chat_id=key.chat_id,
             topic_id=key.topic_id,
             transport=key.transport,
+            provider_override=session.provider,
+            model_override=session.model,
             resume_session=session_id,
             process_label="memory_compact",
         )

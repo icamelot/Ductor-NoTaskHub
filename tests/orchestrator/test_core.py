@@ -115,6 +115,53 @@ async def test_reset_command_resets_current_non_default_provider_bucket(
     assert active.provider_sessions["claude"].session_id == "claude-sid"
 
 
+async def test_new_clears_default_deepseek_bucket_and_preserves_claude(
+    orch: Orchestrator,
+) -> None:
+    key = SessionKey(chat_id=21)
+    orch.models.configure_deepseek(("deepseek-v4-pro",))
+    orch._config.provider = "deepseek"
+    orch._config.model = "deepseek-v4-pro"
+    claude, _ = await orch._sessions.resolve_session(key, provider="claude", model="opus")
+    claude.session_id = "claude-sid"
+    await orch._sessions.update_session(claude)
+    deepseek, _ = await orch._sessions.resolve_session(
+        key, provider="deepseek", model="deepseek-v4-pro"
+    )
+    deepseek.session_id = "deepseek-sid"
+    await orch._sessions.update_session(deepseek)
+
+    await orch.handle_message(key, "/new")
+
+    active = await orch._sessions.get_active(key)
+    assert active is not None
+    assert "deepseek" not in active.provider_sessions
+    assert active.provider_sessions["claude"].session_id == "claude-sid"
+
+
+async def test_reset_clears_active_deepseek_bucket_and_preserves_claude(
+    orch: Orchestrator,
+) -> None:
+    key = SessionKey(chat_id=22)
+    orch.models.configure_deepseek(("deepseek-v4-pro",))
+    claude, _ = await orch._sessions.resolve_session(key, provider="claude", model="opus")
+    claude.session_id = "claude-sid"
+    await orch._sessions.update_session(claude)
+    deepseek, _ = await orch._sessions.resolve_session(
+        key, provider="deepseek", model="deepseek-v4-pro"
+    )
+    deepseek.session_id = "deepseek-sid"
+    await orch._sessions.update_session(deepseek)
+
+    await orch.handle_message(key, "/reset")
+
+    active = await orch._sessions.get_active(key)
+    assert active is not None
+    assert active.provider == "deepseek"
+    assert "deepseek" not in active.provider_sessions
+    assert active.provider_sessions["claude"].session_id == "claude-sid"
+
+
 async def test_reset_command_reports_active_provider_while_new_reports_config_default(
     orch: Orchestrator,
 ) -> None:

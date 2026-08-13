@@ -166,6 +166,34 @@ async def test_sigkill_resets_only_affected_provider(orch: Orchestrator) -> None
     assert session.provider_sessions["codex"].session_id == "codex-sid"
 
 
+async def test_deepseek_sigkill_resets_only_deepseek_bucket(orch: Orchestrator) -> None:
+    key = SessionKey(chat_id=1)
+    orch.models.configure_deepseek(("deepseek-v4-pro",))
+    claude, _ = await orch._sessions.resolve_session(key, provider="claude", model="opus")
+    claude.session_id = "claude-sid"
+    await orch._sessions.update_session(claude)
+    deepseek, _ = await orch._sessions.resolve_session(
+        key, provider="deepseek", model="deepseek-v4-pro"
+    )
+    deepseek.session_id = "deepseek-sid"
+    await orch._sessions.update_session(deepseek)
+
+    sigkill = _mock_response(is_error=True, result="killed", returncode=-9)
+    execute = AsyncMock(side_effect=[sigkill, sigkill])
+    object.__setattr__(orch._cli_service, "execute", execute)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
+
+    await normal(orch, key, "Run", model_override="deepseek-v4-pro")
+
+    first = execute.await_args_list[0].args[0]
+    assert first.provider_override == "deepseek"
+    assert first.resume_session == "deepseek-sid"
+    session = await orch._sessions.get_active(key)
+    assert session is not None
+    assert "deepseek" not in session.provider_sessions
+    assert session.provider_sessions["claude"].session_id == "claude-sid"
+
+
 async def test_streaming_error_preserves_session(orch: Orchestrator) -> None:
     await _establish_session(orch, sid="sess-keep")
 

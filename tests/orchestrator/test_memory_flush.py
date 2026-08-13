@@ -77,6 +77,42 @@ async def test_memory_flusher_fires_silent_turn_after_boundary(tmp_path: Path) -
     assert request.process_label == "memory_flush"
 
 
+async def test_memory_flusher_resumes_active_deepseek_bucket(tmp_path: Path) -> None:
+    flusher, cli = _make_flusher(tmp_path, compact_cfg=MemoryCompactionConfig(enabled=False))
+    key = SessionKey(chat_id=101)
+    session = SessionData(chat_id=101, provider="deepseek", model="deepseek-v4-pro")
+    session.provider_sessions["claude"] = ProviderSessionData(
+        session_id="claude-sid", message_count=2
+    )
+    session.provider_sessions["deepseek"] = ProviderSessionData(
+        session_id="deepseek-sid", message_count=3
+    )
+    flusher.mark_boundary(key)
+    await flusher.maybe_flush(key, session)
+    request = cli.execute.await_args.args[0]
+    assert request.resume_session == "deepseek-sid"
+    assert request.provider_override == "deepseek"
+
+
+async def test_memory_compaction_resumes_active_deepseek_bucket(tmp_path: Path) -> None:
+    flusher, cli = _make_flusher(tmp_path)
+    key = SessionKey(chat_id=101)
+    session = SessionData(chat_id=101, provider="deepseek", model="deepseek-v4-flash")
+    session.provider_sessions["claude"] = ProviderSessionData(
+        session_id="claude-sid", message_count=2
+    )
+    session.provider_sessions["deepseek"] = ProviderSessionData(
+        session_id="deepseek-sid", message_count=3
+    )
+
+    await flusher.compact(key, session)
+
+    request = cli.execute.await_args.args[0]
+    assert request.resume_session == "deepseek-sid"
+    assert request.provider_override == "deepseek"
+    assert request.model_override == "deepseek-v4-flash"
+
+
 async def test_memory_flusher_dedup_within_window(tmp_path: Path) -> None:
     """Two boundaries within dedup_seconds cause only one flush."""
     flusher, cli = _make_flusher(

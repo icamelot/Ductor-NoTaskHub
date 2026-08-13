@@ -29,6 +29,35 @@ async def _simulate_cli_response(
     await mgr.update_session(session, cost_usd=cost_usd, tokens=tokens)
 
 
+async def test_deepseek_and_claude_switch_back_and_reset_are_isolated(tmp_path: Path) -> None:
+    manager = _make_manager(tmp_path)
+    key = SessionKey(chat_id=1)
+    claude, _ = await manager.resolve_session(key, provider="claude", model="opus")
+    await _simulate_cli_response(manager, claude, "claude-sid", cost_usd=0.2, tokens=100)
+
+    deepseek, deepseek_new = await manager.resolve_session(
+        key, provider="deepseek", model="deepseek-v4-pro"
+    )
+    assert deepseek_new is True
+    assert deepseek.session_id == ""
+    await _simulate_cli_response(manager, deepseek, "deepseek-sid", cost_usd=0.1, tokens=50)
+
+    second_model, second_new = await manager.resolve_session(
+        key, provider="deepseek", model="deepseek-v4-flash"
+    )
+    assert second_new is False
+    assert second_model.session_id == "deepseek-sid"
+
+    resumed_claude, claude_new = await manager.resolve_session(key, provider="claude", model="opus")
+    assert claude_new is False
+    assert resumed_claude.session_id == "claude-sid"
+
+    reset = await manager.reset_provider_session(key, provider="deepseek", model="deepseek-v4-pro")
+    assert reset.session_id == ""
+    assert "deepseek" not in reset.provider_sessions
+    assert reset.provider_sessions["claude"].session_id == "claude-sid"
+
+
 async def test_provider_switch_preserves_other_session(tmp_path: Path) -> None:
     mgr = _make_manager(tmp_path)
 

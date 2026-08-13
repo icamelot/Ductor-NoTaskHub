@@ -49,6 +49,98 @@ async def _establish_session(orch: Orchestrator) -> None:
     await normal(orch, SessionKey(chat_id=1), "Setup")
 
 
+async def _seed_claude_and_deepseek(orch: Orchestrator, key: SessionKey) -> None:
+    orch.models.configure_deepseek(("deepseek-v4-pro", "deepseek-v4-flash"))
+    claude, _ = await orch._sessions.resolve_session(key, provider="claude", model="opus")
+    claude.session_id = "claude-sid"
+    await orch._sessions.update_session(claude)
+    deepseek, _ = await orch._sessions.resolve_session(
+        key, provider="deepseek", model="deepseek-v4-pro"
+    )
+    deepseek.session_id = "deepseek-sid"
+    await orch._sessions.update_session(deepseek)
+
+
+@pytest.mark.parametrize(("streaming", "method"), [(False, "execute"), (True, "execute_streaming")])
+async def test_deepseek_turn_resumes_only_deepseek_bucket(
+    orch: Orchestrator, streaming: bool, method: str
+) -> None:
+    key = SessionKey(chat_id=1)
+    await _seed_claude_and_deepseek(orch, key)
+    execute = AsyncMock(return_value=_mock_response(session_id="deepseek-next"))
+    object.__setattr__(orch._cli_service, method, execute)
+    if streaming:
+        await normal_streaming(orch, key, "hello", model_override="deepseek-v4-pro")
+    else:
+        await normal(orch, key, "hello", model_override="deepseek-v4-pro")
+    request = execute.await_args.args[0]
+    assert request.provider_override == "deepseek"
+    assert request.resume_session == "deepseek-sid"
+    session = await orch._sessions.get_active(key)
+    assert session is not None
+    assert session.provider_sessions["claude"].session_id == "claude-sid"
+    assert session.provider_sessions["deepseek"].session_id == "deepseek-next"
+
+
+async def test_switch_back_to_claude_resumes_only_claude_bucket(
+    orch: Orchestrator,
+) -> None:
+    key = SessionKey(chat_id=1)
+    await _seed_claude_and_deepseek(orch, key)
+    execute = AsyncMock(return_value=_mock_response(session_id="claude-next"))
+    object.__setattr__(orch._cli_service, "execute", execute)
+    await normal(orch, key, "back", model_override="opus")
+    request = execute.await_args.args[0]
+    assert request.provider_override == "claude"
+    assert request.resume_session == "claude-sid"
+    session = await orch._sessions.get_active(key)
+    assert session is not None
+    assert session.provider_sessions["deepseek"].session_id == "deepseek-sid"
+    assert session.provider_sessions["claude"].session_id == "claude-next"
+
+
+async def test_topic_deepseek_bucket_does_not_touch_main_chat(orch: Orchestrator) -> None:
+    main_key = SessionKey(chat_id=1)
+    topic_key = SessionKey(chat_id=1, topic_id=42)
+    await _seed_claude_and_deepseek(orch, main_key)
+    orch.models.configure_deepseek(("deepseek-v4-pro",))
+    execute = AsyncMock(return_value=_mock_response(session_id="topic-deepseek"))
+    object.__setattr__(orch._cli_service, "execute", execute)
+    await normal(orch, topic_key, "topic", model_override="deepseek-v4-pro")
+    main = await orch._sessions.get_active(main_key)
+    topic = await orch._sessions.get_active(topic_key)
+    assert main is not None
+    assert topic is not None
+    assert main.provider_sessions["deepseek"].session_id == "deepseek-sid"
+    assert topic.provider_sessions["deepseek"].session_id == "topic-deepseek"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        _mock_response(is_error=True, result="provider error", session_id="deepseek-sid"),
+        _mock_response(is_error=True, timed_out=True, result="", session_id="deepseek-sid"),
+    ],
+)
+async def test_deepseek_error_or_timeout_preserves_both_buckets(
+    orch: Orchestrator, response: AgentResponse
+) -> None:
+    key = SessionKey(chat_id=1)
+    await _seed_claude_and_deepseek(orch, key)
+    execute = AsyncMock(return_value=response)
+    object.__setattr__(orch._cli_service, "execute", execute)
+    object.__setattr__(orch._process_registry, "kill_by_chat_topic", AsyncMock(return_value=0))
+
+    await normal(orch, key, "fail", model_override="deepseek-v4-pro")
+
+    request = execute.await_args.args[0]
+    assert request.resume_session == "deepseek-sid"
+    session = await orch._sessions.get_active(key)
+    assert session is not None
+    assert session.provider_sessions["claude"].session_id == "claude-sid"
+    assert session.provider_sessions["deepseek"].session_id == "deepseek-sid"
+
+
 # -- normal flow --
 
 
