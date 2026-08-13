@@ -5,12 +5,24 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from ductor_bot.cli.base import CLIConfig, docker_wrap
+from ductor_bot.cli.deepseek import DeepseekRuntime
 from ductor_bot.cli.executor import build_subprocess_env
 from ductor_bot.infra.env_secrets import clear_cache
 
 _REMOVED_ENV_PARTS = ("DUCTOR", "TASK", "ID")
 _REMOVED_TASK_ENV = "_".join(_REMOVED_ENV_PARTS)
+
+
+def _deepseek_runtime() -> DeepseekRuntime:
+    return DeepseekRuntime(
+        requested=True,
+        base_url="https://api.deepseek.com/anthropic",
+        models=("deepseek-v4-pro",),
+        api_key="deepseek-token",
+    )
 
 
 def test_subprocess_env_merges_secrets(tmp_path: Path) -> None:
@@ -41,6 +53,37 @@ def test_subprocess_env_does_not_override_existing(tmp_path: Path) -> None:
 
     assert env is not None
     assert env["PATH"] != "/evil"
+
+
+def test_host_deepseek_overrides_have_highest_precedence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = _deepseek_runtime()
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://native.example")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "native-token")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config = CLIConfig(provider="deepseek", working_dir=workspace, deepseek=runtime)
+    env = build_subprocess_env(config)
+    assert env is not None
+    assert env["ANTHROPIC_BASE_URL"] == runtime.base_url
+    assert env["ANTHROPIC_AUTH_TOKEN"] == runtime.api_key
+
+
+def test_native_claude_receives_no_deepseek_derived_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = _deepseek_runtime()
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://native.example")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "native-token")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config = CLIConfig(provider="claude", working_dir=workspace, deepseek=runtime)
+    env = build_subprocess_env(config)
+    assert env is not None
+    assert env["ANTHROPIC_BASE_URL"] == "https://native.example"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "native-token"
+    assert env.get("ANTHROPIC_AUTH_TOKEN") != runtime.api_key
 
 
 def test_subprocess_env_works_without_env_file(tmp_path: Path) -> None:
@@ -184,3 +227,61 @@ def test_docker_wrap_provider_extra_env_wins(tmp_path: Path) -> None:
 
     assert "GEMINI_API_KEY=from-provider" in cmd
     assert "GEMINI_API_KEY=from-dotenv" not in cmd
+
+
+def test_docker_deepseek_provider_env_wins_over_dotenv(tmp_path: Path) -> None:
+    runtime = _deepseek_runtime()
+    root = tmp_path
+    agent_home = root / "agents" / "worker"
+    workspace = agent_home / "workspace"
+    workspace.mkdir(parents=True)
+    (root / ".env").write_text(
+        "ANTHROPIC_BASE_URL=https://root.example\nANTHROPIC_AUTH_TOKEN=root-token\n"
+    )
+    (agent_home / ".env").write_text(
+        "ANTHROPIC_BASE_URL=https://agent.example\nANTHROPIC_AUTH_TOKEN=agent-token\n"
+    )
+    clear_cache()
+    config = CLIConfig(
+        provider="deepseek",
+        working_dir=workspace,
+        docker_container="sandbox",
+        agent_name="worker",
+        deepseek=runtime,
+    )
+    command, _ = docker_wrap(["claude"], config)
+    injected = [command[index + 1] for index, item in enumerate(command) if item == "-e"]
+    env = dict(item.split("=", 1) for item in injected)
+    assert env["ANTHROPIC_BASE_URL"] == runtime.base_url
+    assert env["ANTHROPIC_AUTH_TOKEN"] == runtime.api_key
+    assert injected.count(f"ANTHROPIC_BASE_URL={runtime.base_url}") == 1
+    assert injected.count(f"ANTHROPIC_AUTH_TOKEN={runtime.api_key}") == 1
+
+
+def test_docker_native_claude_keeps_dotenv_and_not_deepseek_runtime(tmp_path: Path) -> None:
+    runtime = _deepseek_runtime()
+    root = tmp_path
+    agent_home = root / "agents" / "worker"
+    workspace = agent_home / "workspace"
+    workspace.mkdir(parents=True)
+    (root / ".env").write_text(
+        "ANTHROPIC_BASE_URL=https://root.example\nANTHROPIC_AUTH_TOKEN=root-token\n"
+    )
+    (agent_home / ".env").write_text(
+        "ANTHROPIC_BASE_URL=https://agent.example\nANTHROPIC_AUTH_TOKEN=agent-token\n"
+    )
+    clear_cache()
+    config = CLIConfig(
+        provider="claude",
+        working_dir=workspace,
+        docker_container="sandbox",
+        agent_name="worker",
+        deepseek=runtime,
+    )
+    command, _ = docker_wrap(["claude"], config)
+    injected = [command[index + 1] for index, item in enumerate(command) if item == "-e"]
+    env = dict(item.split("=", 1) for item in injected)
+    assert env["ANTHROPIC_BASE_URL"] == "https://agent.example"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "agent-token"
+    assert runtime.base_url not in injected
+    assert runtime.api_key not in injected

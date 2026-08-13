@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli._log_redact import redact_cmd_for_log
+from ductor_bot.cli.deepseek import DeepseekRuntime
 from ductor_bot.cli.stream_events import StreamEvent
 from ductor_bot.cli.types import CLIResponse
 
@@ -127,6 +128,15 @@ class CLIConfig:
     # External transcription hooks (#66) — empty strings keep built-in strategies.
     transcribe_command: str = ""
     video_transcribe_command: str = ""
+    # DeepSeek delegates to Claude CLI while retaining its logical provider.
+    deepseek: DeepseekRuntime | None = None
+
+
+def deepseek_invocation_env(config: CLIConfig) -> dict[str, str]:
+    """Return DeepSeek overrides only for a logical DeepSeek invocation."""
+    if config.provider != "deepseek" or config.deepseek is None:
+        return {}
+    return config.deepseek.invocation_env()
 
 
 _CONTAINER_DUCTOR_MOUNT = "/ductor"
@@ -218,6 +228,7 @@ def docker_wrap(
             merged_extra.update(load_env_secrets(ductor_home / ".env"))
         if extra_env:
             merged_extra.update(extra_env)  # Provider-specific overrides win.
+        merged_extra.update(deepseek_invocation_env(config))
         extra_env = merged_extra or None
 
         env_flags = _docker_env_flags(config, container_home, container_shared)

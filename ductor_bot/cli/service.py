@@ -9,10 +9,11 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.base import CLIConfig
+from ductor_bot.cli.deepseek import DeepseekRuntime
 from ductor_bot.cli.factory import create_cli
 from ductor_bot.cli.stream_events import (
     AssistantTextDelta,
@@ -34,6 +35,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _ToolCallback = Callable[[ToolUseEvent], Awaitable[None]]
+
+
+def _disabled_deepseek_runtime() -> DeepseekRuntime:
+    return DeepseekRuntime(
+        requested=False,
+        base_url="https://api.deepseek.com/anthropic",
+        models=(),
+        error="disabled",
+    )
 
 
 class _StreamCallbacks:
@@ -118,9 +128,12 @@ class CLIServiceConfig:
     # External transcription hooks (#66) — empty strings keep built-in strategies.
     transcribe_command: str = ""
     video_transcribe_command: str = ""
+    deepseek: DeepseekRuntime = field(default_factory=_disabled_deepseek_runtime)
 
     def cli_parameters_for_provider(self, provider: str) -> list[str]:
         """Return CLI parameters for the given provider."""
+        if provider == "deepseek":
+            return list(self.claude_cli_parameters)
         if provider == "codex":
             return list(self.codex_cli_parameters)
         if provider == "gemini":
@@ -411,6 +424,7 @@ class CLIService:
                 interagent_port=self._config.interagent_port,
                 transcribe_command=self._config.transcribe_command,
                 video_transcribe_command=self._config.video_transcribe_command,
+                deepseek=self._config.deepseek,
             )
         )
 

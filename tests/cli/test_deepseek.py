@@ -8,14 +8,36 @@ from pathlib import Path
 
 import pytest
 
+from ductor_bot.cli.base import CLIConfig
+from ductor_bot.cli.claude_provider import ClaudeCodeCLI
 from ductor_bot.cli.deepseek import (
+    DeepseekRuntime,
     claude_cli_runnable,
     load_deepseek_api_key,
     resolve_deepseek_runtime,
 )
+from ductor_bot.cli.factory import create_cli
 from ductor_bot.config import DeepseekConfig
 from ductor_bot.infra.env_secrets import clear_cache
 from ductor_bot.workspace.paths import DuctorPaths
+
+
+@pytest.fixture
+def runtime() -> DeepseekRuntime:
+    return resolve_deepseek_runtime(
+        DeepseekConfig(enabled=True, models=["deepseek-v4-pro"]),
+        "secret-value",
+        reserved_models=frozenset(),
+    )
+
+
+def test_factory_delegates_deepseek_to_claude_without_changing_provider(
+    runtime: DeepseekRuntime,
+) -> None:
+    config = CLIConfig(provider="deepseek", model="deepseek-v4-pro", deepseek=runtime)
+    cli = create_cli(config)
+    assert isinstance(cli, ClaudeCodeCLI)
+    assert cli._config.provider == "deepseek"
 
 
 def test_runtime_normalizes_models_and_hides_key() -> None:

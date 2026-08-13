@@ -18,6 +18,7 @@ from ductor_bot.cli.base import (
     CLIConfig,
     _feed_stdin_and_close,
     _win_feed_stdin,
+    deepseek_invocation_env,
 )
 from ductor_bot.cli.stream_events import ResultEvent, StreamEvent
 from ductor_bot.cli.timeout_controller import TimeoutController
@@ -74,6 +75,7 @@ def build_subprocess_env(config: CLIConfig) -> dict[str, str] | None:
         # Sub-agent home is <main_home>/agents/<name>/
         main_home = ductor_home.parent.parent
         env["DUCTOR_SHARED_MEMORY_PATH"] = str(main_home / "SHAREDMEMORY.md")
+    env.update(deepseek_invocation_env(config))
     return env
 
 

@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from ductor_bot.cli.process_registry import ProcessRegistry
+from ductor_bot.cli.deepseek import DeepseekRuntime
 from ductor_bot.cli.service import CLIService, CLIServiceConfig
 from ductor_bot.cli.stream_events import StreamEvent, ToolUseEvent
 from ductor_bot.cli.types import AgentRequest, CLIResponse
@@ -151,6 +152,42 @@ def test_cli_parameters_for_antigravity() -> None:
     )
 
     assert cfg.cli_parameters_for_provider("antigravity") == ["--log-file", "agy.log"]
+
+
+def test_deepseek_uses_claude_parameters_and_runtime() -> None:
+    runtime = DeepseekRuntime(
+        requested=True,
+        base_url="https://api.deepseek.com/anthropic",
+        models=("deepseek-v4-pro",),
+        api_key="secret",
+    )
+    cfg = CLIServiceConfig(
+        working_dir="/tmp",
+        default_model="deepseek-v4-pro",
+        provider="deepseek",
+        max_turns=None,
+        max_budget_usd=None,
+        permission_mode="bypassPermissions",
+        deepseek=runtime,
+        claude_cli_parameters=("--verbose",),
+    )
+    models = ModelRegistry()
+    models.configure_deepseek(runtime.models)
+    service = CLIService(
+        config=cfg,
+        models=models,
+        available_providers=frozenset({"deepseek"}),
+        process_registry=ProcessRegistry(),
+    )
+
+    with patch("ductor_bot.cli.service.create_cli") as mock_create:
+        service._make_cli(AgentRequest(prompt="hi", chat_id=1))
+
+    cli_config = mock_create.call_args.args[0]
+    assert cli_config.provider == "deepseek"
+    assert cli_config.model == "deepseek-v4-pro"
+    assert cli_config.deepseek is runtime
+    assert cli_config.cli_parameters == ["--verbose"]
 
 
 async def test_stream_callbacks_dispatches_compact_boundary() -> None:
