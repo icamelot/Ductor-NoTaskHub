@@ -726,6 +726,8 @@ git commit -m "feat(deepseek): integrate availability and model selection"
 
 **Files:**
 
+- Modify: `ductor_bot/orchestrator/memory_flush.py` when the DeepSeek regression exposes the
+  existing implicit-default-provider defect in flush/compaction requests.
 - Modify: `tests/session/test_provider_isolation.py`
 - Modify: `tests/orchestrator/test_flows.py`
 - Modify: `tests/orchestrator/test_error_no_reset.py`
@@ -905,7 +907,7 @@ Expected: new tests verify that every flow uses the logical provider. These are 
   tests/orchestrator/test_core.py
 git add tests/session/test_provider_isolation.py tests/orchestrator/test_flows.py \
   tests/orchestrator/test_error_no_reset.py tests/orchestrator/test_memory_flush.py \
-  tests/orchestrator/test_core.py
+  tests/orchestrator/test_core.py ductor_bot/orchestrator/memory_flush.py
 git commit -m "test(deepseek): enforce provider session isolation"
 ```
 
