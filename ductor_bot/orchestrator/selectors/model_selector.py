@@ -450,7 +450,10 @@ async def switch_model(
     # updating the global default only from the main chat.
     old = active_session.model if active_session else orch._config.model
     new_provider = orch.models.provider_for(model_id)
-    if new_provider == "deepseek" and "deepseek" not in orch.available_providers:
+    is_configured_deepseek = model_id in orch._providers.deepseek_runtime.models
+    if (
+        new_provider == "deepseek" or (new_provider == "codex" and is_configured_deepseek)
+    ) and "deepseek" not in orch.available_providers:
         return t("model.provider_unavailable", provider="DeepSeek")
     same_model = old == model_id
     effort_only = same_model and reasoning_effort is not None

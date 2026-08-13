@@ -518,7 +518,8 @@ async def test_switch_model_basic(orch: Orchestrator) -> None:
 async def test_direct_model_selection_rejects_unavailable_deepseek(
     orch: Orchestrator,
 ) -> None:
-    orch.models.configure_deepseek(("deepseek-v4-pro",))
+    assert orch.models.deepseek_models == frozenset()
+    assert "deepseek-v4-pro" in orch._providers.deepseek_runtime.models
     orch._providers._available_providers = frozenset({"claude"})
     result = await switch_model(orch, SessionKey(chat_id=1), "deepseek-v4-pro")
     assert "not available" in result.lower()

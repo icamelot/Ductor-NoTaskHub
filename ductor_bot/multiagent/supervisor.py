@@ -31,6 +31,10 @@ _MAX_BACKOFF = 60  # seconds; cap for the main agent's unbounded transient retri
 _MAX_BACKOFF_SHIFT = 6  # clamp the doubling exponent so unbounded retries stay a small int
 
 
+class _SubAgentConfigSyncError(RuntimeError):
+    """Sanitized boundary error for rebuild-time authorization synchronization."""
+
+
 def _is_transient(exc: Exception) -> bool:
     """Classify an exception as a transient (retryable) network failure.
 
@@ -429,7 +433,11 @@ class AgentSupervisor:
             except Exception:
                 with contextlib.suppress(Exception):
                     await new_stack.shutdown()
-                raise
+                logger.error(  # noqa: TRY400 - original exception may contain access lists
+                    "Failed to synchronize sub-agent config name=%s category=unavailable",
+                    name,
+                )
+                raise _SubAgentConfigSyncError("sub-agent config synchronization failed") from None
         self._stacks[name] = new_stack
         if self._bus:
             self._bus.register(name, new_stack)

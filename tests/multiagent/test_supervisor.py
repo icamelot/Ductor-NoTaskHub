@@ -510,6 +510,7 @@ class TestRebuildStack:
         self,
         supervisor: AgentSupervisor,
         tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         old_stack = MagicMock(
             config=AgentConfig(ductor_home=str(tmp_path / "old")),
@@ -531,12 +532,15 @@ class TestRebuildStack:
                 supervisor,
                 "_sync_sub_agent_config",
                 new_callable=AsyncMock,
-                side_effect=OSError("sync failed"),
+                side_effect=OSError("must-not-log [111111111]"),
             ),
-            pytest.raises(OSError, match="sync failed"),
+            pytest.raises(RuntimeError) as error,
         ):
             await supervisor._rebuild_stack("sub1", old_stack)
 
+        assert "111111111" not in str(error.value)
+        assert "111111111" not in caplog.text
+        assert "Failed to synchronize sub-agent config name=sub1" in caplog.text
         assert supervisor._stacks["sub1"] is old_stack
         supervisor._bus.register.assert_not_called()
         new_stack.shutdown.assert_awaited_once()
