@@ -36,6 +36,17 @@ def test_sessions_path() -> None:
     assert paths.sessions_path == Path("/home/test/.ductor/sessions.json")
 
 
+def test_sub_agent_paths_resolve_root_owned_usage_state(tmp_path: Path) -> None:
+    paths = DuctorPaths(ductor_home=tmp_path / "agents" / "worker")
+    assert paths.root_ductor_home == tmp_path
+    assert paths.root_env_file == tmp_path / ".env"
+    assert paths.deepseek_balance_snapshots_path == tmp_path / "deepseek_balance_snapshots.json"
+    assert paths.legacy_balance_snapshots_path == (
+        tmp_path / "workspace" / "skills" / "personal-assistant" / ".balance_snapshots.json"
+    )
+    assert paths.claude_credentials_path == Path.home() / ".claude" / ".credentials.json"
+
+
 def test_logs_dir() -> None:
     paths = DuctorPaths(
         ductor_home=Path("/home/test/.ductor"),

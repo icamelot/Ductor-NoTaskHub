@@ -40,6 +40,13 @@ class DuctorPaths:
     # -- User data paths (inside ductor_home) --
 
     @property
+    def root_ductor_home(self) -> Path:
+        """Main Ductor home shared by the main agent and sub-agents."""
+        if self.ductor_home.parent.name == "agents":
+            return self.ductor_home.parent.parent
+        return self.ductor_home
+
+    @property
     def workspace(self) -> Path:
         return self.ductor_home / "workspace"
 
@@ -124,6 +131,32 @@ class DuctorPaths:
     def env_file(self) -> Path:
         """User-managed ``.env`` for external API secrets."""
         return self.ductor_home / ".env"
+
+    @property
+    def root_env_file(self) -> Path:
+        """Root-owned startup secret file shared with sub-agents."""
+        return self.root_ductor_home / ".env"
+
+    @property
+    def deepseek_balance_snapshots_path(self) -> Path:
+        """Root-owned DeepSeek balance history."""
+        return self.root_ductor_home / "deepseek_balance_snapshots.json"
+
+    @property
+    def legacy_balance_snapshots_path(self) -> Path:
+        """Optional legacy personal-assistant snapshot source."""
+        return (
+            self.root_ductor_home
+            / "workspace"
+            / "skills"
+            / "personal-assistant"
+            / ".balance_snapshots.json"
+        )
+
+    @property
+    def claude_credentials_path(self) -> Path:
+        """Claude Code OAuth credential store."""
+        return Path.home() / ".claude" / ".credentials.json"
 
     @property
     def mainmemory_path(self) -> Path:

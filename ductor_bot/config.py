@@ -211,6 +211,14 @@ class CLIParametersConfig(BaseModel):
     grok: list[str] = Field(default_factory=list)
 
 
+class DeepseekConfig(BaseModel):
+    """Non-secret configuration for the DeepSeek logical provider."""
+
+    enabled: bool = False
+    base_url: str = "https://api.deepseek.com/anthropic"
+    models: list[str] = Field(default_factory=lambda: ["deepseek-v4-pro", "deepseek-v4-flash"])
+
+
 class MatrixConfig(BaseModel):
     """Matrix homeserver connection settings."""
 
@@ -445,6 +453,8 @@ class AgentConfig(BaseModel):
     webhooks: WebhookConfig = Field(default_factory=WebhookConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     cli_parameters: CLIParametersConfig = Field(default_factory=CLIParametersConfig)
+    deepseek: DeepseekConfig = Field(default_factory=DeepseekConfig)
+    claude_token_keepalive: bool = True
     image: ImageConfig = Field(default_factory=ImageConfig)
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
     cron_delivery_retry: CronDeliveryRetryConfig = Field(default_factory=CronDeliveryRetryConfig)
@@ -639,14 +649,27 @@ class ModelRegistry:
     Codex models are discovered dynamically at runtime.
     """
 
-    @staticmethod
-    def provider_for(model_id: str) -> str:
+    def __init__(self) -> None:
+        self._deepseek_models: frozenset[str] = frozenset()
+
+    @property
+    def deepseek_models(self) -> frozenset[str]:
+        """Return configured DeepSeek model IDs for this registry instance."""
+        return self._deepseek_models
+
+    def configure_deepseek(self, models: tuple[str, ...]) -> None:
+        """Replace the instance-local set of DeepSeek model IDs."""
+        self._deepseek_models = frozenset(models)
+
+    def provider_for(self, model_id: str) -> str:
         """Return the provider for a model ID.
 
         Claude Code accepts both the short aliases in ``CLAUDE_MODELS`` and
         full model IDs (``claude-opus-4-7``), so any ``claude-`` prefix
         routes to Claude.
         """
+        if model_id in self._deepseek_models:
+            return "deepseek"
         if model_id in CLAUDE_MODELS or model_id.startswith("claude-"):
             return "claude"
         if (

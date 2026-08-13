@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,26 @@ def test_agent_config_defaults() -> None:
     assert cfg.cron_preflight.enabled is False
     assert cfg.cron_preflight.timeout_seconds == 15.0
     assert cfg.cron_preflight.skip_marker == "HEARTBEAT_OK"
+
+
+def test_deepseek_defaults_and_keepalive_default() -> None:
+    cfg = AgentConfig()
+    assert cfg.deepseek.enabled is False
+    assert cfg.deepseek.base_url == "https://api.deepseek.com/anthropic"
+    assert cfg.deepseek.models == ["deepseek-v4-pro", "deepseek-v4-flash"]
+    assert cfg.claude_token_keepalive is True
+    assert "api_key" not in cfg.deepseek.model_dump()
+
+
+def test_config_example_has_no_deepseek_secret() -> None:
+    config_path = Path(__file__).resolve().parents[1] / "config.example.json"
+    deepseek = json.loads(config_path.read_text(encoding="utf-8"))["deepseek"]
+    assert deepseek == {
+        "enabled": False,
+        "base_url": "https://api.deepseek.com/anthropic",
+        "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+    }
+    assert "api_key" not in deepseek
 
 
 def test_agent_config_normalizes_nullish_gemini_api_key() -> None:
@@ -160,6 +181,13 @@ def test_registry_provider_for_codex() -> None:
     assert reg.provider_for("gpt-5.2-codex") == "codex"
     assert reg.provider_for("gpt-5.3-codex") == "codex"
     assert reg.provider_for("o3") == "codex"
+
+
+def test_model_registry_keeps_deepseek_logically_separate() -> None:
+    registry = ModelRegistry()
+    registry.configure_deepseek(("deepseek-v4-pro", "deepseek-v4-flash"))
+    assert registry.provider_for("deepseek-v4-pro") == "deepseek"
+    assert registry.provider_for("opus") == "claude"
 
 
 def test_registry_provider_for_gemini_prefix() -> None:

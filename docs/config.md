@@ -35,6 +35,27 @@ API config persistence note:
 
 ## External API Secrets (`~/.ductor/.env`)
 
+DeepSeek uses `DEEPSEEK_API_KEY` from the root Ductor home's `.env` only. Its
+non-secret settings are configured in `config.json`:
+
+```json
+"deepseek": {
+  "enabled": false,
+  "base_url": "https://api.deepseek.com/anthropic",
+  "models": ["deepseek-v4-pro", "deepseek-v4-flash"]
+}
+```
+
+The settings above hot reload. A changed key requires restarting Ductor because
+the key is captured at startup. Sub-agents share the root key without copying it
+into their own config or `.env`. DeepSeek remains the logical provider and uses
+its own `deepseek` session bucket even though execution delegates to Claude CLI.
+
+`/usage` reports DeepSeek balance together with Claude Code and Codex plan usage.
+The main agent owns `~/.ductor/deepseek_balance_snapshots.json`; sub-agents only
+read it. `claude_token_keepalive` defaults to `true` and enables the main-agent-only
+Claude OAuth login-token refresher.
+
 User-defined environment secrets for external APIs (e.g. `PPLX_API_KEY`, `DEEPSEEK_API_KEY`).
 
 Standard dotenv syntax:

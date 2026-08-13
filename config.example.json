@@ -3,6 +3,12 @@
     "log_level": "INFO",
     "provider": "claude",
     "model": "sonnet",
+    "deepseek": {
+        "enabled": false,
+        "base_url": "https://api.deepseek.com/anthropic",
+        "models": ["deepseek-v4-pro", "deepseek-v4-flash"]
+    },
+    "claude_token_keepalive": true,
     "language": "en",
     "ductor_home": "~/.ductor",
     "user_timezone": "Europe/Berlin",

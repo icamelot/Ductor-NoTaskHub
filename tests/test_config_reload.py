@@ -89,6 +89,15 @@ class TestClassifyChanges:
         assert hot == {"project_roots": {"my-project": "~/code/my-project"}}
         assert restart == []
 
+    def test_deepseek_is_hot_but_keepalive_requires_restart(self) -> None:
+        changes = {
+            "deepseek": ({"enabled": False}, {"enabled": True}),
+            "claude_token_keepalive": (True, False),
+        }
+        hot, restart = classify_changes(changes)
+        assert hot == {"deepseek": {"enabled": True}}
+        assert restart == ["claude_token_keepalive"]
+
 
 class TestConfigReloader:
     def _write_config(self, path: Path, **overrides: Any) -> AgentConfig:
