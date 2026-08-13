@@ -30,6 +30,14 @@ class Balance:
 
 
 @dataclass(frozen=True, slots=True)
+class BalanceDelta:
+    currency: str
+    current: Decimal
+    change: Decimal | None
+    kind: Literal["spend", "recharge", "unavailable"]
+
+
+@dataclass(frozen=True, slots=True)
 class UsageWindow:
     used_percent: Decimal
     resets_at: datetime | None

@@ -7,6 +7,7 @@ from ductor_bot.usage.clients import (
 )
 from ductor_bot.usage.models import (
     Balance,
+    BalanceDelta,
     DeepseekUsage,
     PlanUsage,
     ProviderUsage,
@@ -17,6 +18,7 @@ from ductor_bot.usage.models import (
 
 __all__ = [
     "Balance",
+    "BalanceDelta",
     "DeepseekUsage",
     "PlanUsage",
     "ProviderUsage",
