@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from ductor_bot.cli.deepseek import DeepseekRuntime
 from ductor_bot.config import (
     _GEMINI_ALIASES,
     ANTIGRAVITY_MODELS,
@@ -31,6 +33,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _disabled_deepseek_runtime() -> DeepseekRuntime:
+    return DeepseekRuntime(
+        requested=False,
+        base_url="https://api.deepseek.com/anthropic",
+        models=(),
+        error="disabled",
+    )
+
+
 class ProviderManager:
     """Owns provider authentication state, model resolution, and provider metadata.
 
@@ -41,14 +52,22 @@ class ProviderManager:
         self,
         config: AgentConfig,
         *,
+        deepseek_runtime: DeepseekRuntime | None = None,
+        claude_cli_runnable: bool = False,
         codex_cache_fn: Callable[[], CodexModelCache | None] | None = None,
     ) -> None:
         self._config = config
         self._models = ModelRegistry()
+        self._deepseek_runtime = deepseek_runtime or _disabled_deepseek_runtime()
+        self._claude_cli_runnable = claude_cli_runnable
+        self._models.configure_deepseek(
+            self._deepseek_runtime.models if self._deepseek_runtime.configured else ()
+        )
         self._known_model_ids: frozenset[str] = frozenset()
         self._available_providers: frozenset[str] = frozenset()
         self._gemini_api_key_mode: bool | None = None
         self._codex_cache_fn = codex_cache_fn
+        self._cli_service: CLIService | None = None
         self.refresh_known_model_ids()
 
     # -- Public properties ----------------------------------------------------
@@ -57,6 +76,11 @@ class ProviderManager:
     def models(self) -> ModelRegistry:
         """Public access to the model registry."""
         return self._models
+
+    @property
+    def deepseek_runtime(self) -> DeepseekRuntime:
+        """Effective redaction-safe DeepSeek runtime."""
+        return self._deepseek_runtime
 
     @property
     def available_providers(self) -> frozenset[str]:
@@ -78,6 +102,8 @@ class ProviderManager:
         _model, provider = self.resolve_runtime_target(self._config.model)
         if provider == "claude":
             return "Claude Code"
+        if provider == "deepseek":
+            return "DeepSeek"
         if provider == "gemini":
             return "Gemini"
         if provider == "antigravity":
@@ -110,6 +136,26 @@ class ProviderManager:
         self._available_providers = frozenset(
             name for name, res in auth_results.items() if res.is_authenticated
         )
+        if self._deepseek_runtime.configured and self._claude_cli_runnable:
+            self._available_providers |= frozenset({"deepseek"})
+        self._cli_service = cli_service
+        cli_service.update_available_providers(self._available_providers)
+
+    def refresh_deepseek(
+        self,
+        runtime: DeepseekRuntime,
+        cli_service: CLIService,
+    ) -> None:
+        """Apply hot-reloaded non-secret DeepSeek configuration."""
+        self._deepseek_runtime = runtime
+        self._models.configure_deepseek(runtime.models if runtime.configured else ())
+        self.refresh_known_model_ids()
+        providers = set(self._available_providers)
+        providers.discard("deepseek")
+        if self._deepseek_runtime.configured and self._claude_cli_runnable:
+            providers.add("deepseek")
+        self._available_providers = frozenset(providers)
+        self._cli_service = cli_service
         cli_service.update_available_providers(self._available_providers)
 
     def init_gemini_state(self, paths_workspace: object) -> None:
@@ -153,6 +199,18 @@ class ProviderManager:
 
     def refresh_known_model_ids(self) -> None:
         """Refresh directive-known model IDs from dynamic provider registries."""
+        cache = self._codex_cache_fn() if self._codex_cache_fn else None
+        codex_ids = frozenset(
+            model.id for model in getattr(cache, "models", ()) if isinstance(model.id, str)
+        )
+        if codex_ids.intersection(self._deepseek_runtime.models):
+            self._deepseek_runtime = replace(self._deepseek_runtime, error="model_collision")
+            self._models.configure_deepseek(())
+            self._available_providers = frozenset(
+                provider for provider in self._available_providers if provider != "deepseek"
+            )
+            if self._cli_service is not None:
+                self._cli_service.update_available_providers(self._available_providers)
         self._known_model_ids = (
             CLAUDE_MODELS
             | ANTIGRAVITY_MODELS
@@ -161,6 +219,7 @@ class ProviderManager:
             | get_gemini_models()
             | get_antigravity_models()
             | get_grok_models()
+            | self._models.deepseek_models
         )
 
     def resolve_runtime_target(self, requested_model: str | None = None) -> tuple[str, str]:
@@ -179,6 +238,13 @@ class ProviderManager:
         """Return the default model ID for a provider, or empty string if unknown."""
         if provider == "claude":
             return self._config.model if self._config.provider == "claude" else "sonnet"
+        if provider == "deepseek":
+            return (
+                self._config.model
+                if self._config.provider == "deepseek"
+                and self._config.model in self._models.deepseek_models
+                else (self._deepseek_runtime.models[0] if self._deepseek_runtime.models else "")
+            )
         if provider == "grok":
             return self._config.model if self._config.provider == "grok" else "grok-4.5"
         if provider == "codex":
@@ -199,7 +265,7 @@ class ProviderManager:
         - known model   (``@opus``)  -> (inferred_provider, model)
         - unknown                    -> None
         """
-        if key in ("claude", "codex", "gemini", "antigravity", "grok"):
+        if key in ("claude", "deepseek", "codex", "gemini", "antigravity", "grok"):
             return key, self.default_model_for_provider(key)
         if self.is_known_model(key):
             provider = self._models.provider_for(key)
@@ -218,6 +284,7 @@ class ProviderManager:
         """
         provider_meta: dict[str, tuple[str, str]] = {
             "claude": ("Claude Code", "#F97316"),
+            "deepseek": ("DeepSeek", "#4D6BFE"),
             "gemini": ("Gemini", "#8B5CF6"),
             "codex": ("Codex", "#10B981"),
             "antigravity": ("Antigravity", "#3B82F6"),
@@ -229,6 +296,8 @@ class ProviderManager:
             models: list[str]
             if pid == "claude":
                 models = sorted(CLAUDE_MODELS)
+            elif pid == "deepseek":
+                models = sorted(self._models.deepseek_models)
             elif pid == "gemini":
                 gemini = get_gemini_models()
                 models = sorted(gemini) if gemini else sorted(_GEMINI_ALIASES)

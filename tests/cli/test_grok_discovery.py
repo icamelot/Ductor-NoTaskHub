@@ -109,8 +109,8 @@ async def test_cache_persists_discovered_models(tmp_path: Path) -> None:
 def test_set_grok_models_updates_registry_and_order() -> None:
     set_grok_models(("grok-z", "grok-a"))
     assert get_grok_models_ordered() == ("grok-z", "grok-a")
-    assert ModelRegistry.provider_for("grok-z") == "grok"
-    assert ModelRegistry.provider_for("grok-a") == "grok"
+    assert ModelRegistry().provider_for("grok-z") == "grok"
+    assert ModelRegistry().provider_for("grok-a") == "grok"
 
 
 def test_fallback_models_match_hardcoded() -> None:

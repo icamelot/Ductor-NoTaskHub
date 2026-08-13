@@ -58,6 +58,10 @@ async def create_orchestrator(
     if docker_container:
         await asyncio.to_thread(_docker_skill_resync, paths)
 
+    from ductor_bot.cli.deepseek import claude_cli_runnable
+
+    claude_is_runnable = await asyncio.to_thread(claude_cli_runnable, docker_container)
+
     await asyncio.to_thread(
         inject_runtime_environment,
         paths,
@@ -72,6 +76,7 @@ async def create_orchestrator(
         docker_container=docker_container,
         agent_name=agent_name,
         interagent_port=config.interagent_port,
+        claude_cli_is_runnable=claude_is_runnable,
     )
     orch._docker = docker_mgr
 
@@ -110,6 +115,7 @@ async def create_orchestrator(
         codex_cache=codex_cache,
     )
     orch._providers._codex_cache_fn = lambda: orch._observers.codex_cache
+    orch._providers.refresh_known_model_ids()
     await orch._observers.start_all(docker_container=docker_container)
 
     # Direct API server (WebSocket, designed for Tailscale)

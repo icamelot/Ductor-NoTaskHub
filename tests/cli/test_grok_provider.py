@@ -241,10 +241,10 @@ class TestFactoryAndRegistry:
         assert isinstance(cli, GrokCLI)
 
     def test_model_registry_routes_grok(self) -> None:
-        assert ModelRegistry.provider_for("grok-4.5") == "grok"
-        assert ModelRegistry.provider_for("grok-composer-2.5-fast") == "grok"
-        assert ModelRegistry.provider_for("grok-custom-future") == "grok"
-        assert ModelRegistry.provider_for("opus") == "claude"
+        assert ModelRegistry().provider_for("grok-4.5") == "grok"
+        assert ModelRegistry().provider_for("grok-composer-2.5-fast") == "grok"
+        assert ModelRegistry().provider_for("grok-custom-future") == "grok"
+        assert ModelRegistry().provider_for("opus") == "claude"
 
     def test_cli_response_prefers_explicit_total_tokens(self) -> None:
         r = CLIResponse(

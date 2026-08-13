@@ -6,7 +6,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ductor_bot.config import AgentConfig, reset_gemini_models, set_gemini_models
+from ductor_bot.cli.auth import AuthResult, AuthStatus
+from ductor_bot.cli.deepseek import DeepseekRuntime, resolve_deepseek_runtime
+from ductor_bot.config import (
+    AgentConfig,
+    DeepseekConfig,
+    reset_gemini_models,
+    set_gemini_models,
+)
 from ductor_bot.orchestrator.providers import ProviderManager
 
 
@@ -25,6 +32,86 @@ def _pm(
 ) -> ProviderManager:
     cfg = AgentConfig(model=model, provider=provider)
     return ProviderManager(cfg, codex_cache_fn=codex_cache_fn)  # type: ignore[arg-type]
+
+
+def _deepseek_runtime() -> DeepseekRuntime:
+    return resolve_deepseek_runtime(
+        DeepseekConfig(enabled=True, models=["deepseek-v4-pro", "deepseek-v4-flash"]),
+        "secret",
+        reserved_models=frozenset({"opus"}),
+    )
+
+
+def test_deepseek_available_with_key_and_installed_claude_but_no_oauth() -> None:
+    manager = ProviderManager(
+        AgentConfig(), deepseek_runtime=_deepseek_runtime(), claude_cli_runnable=True
+    )
+    cli_service = MagicMock()
+    manager.apply_auth_results(
+        {
+            "claude": AuthResult("claude", AuthStatus.INSTALLED),
+            "codex": AuthResult("codex", AuthStatus.NOT_FOUND),
+        },
+        auth_status_enum=AuthStatus,
+        cli_service=cli_service,
+    )
+    assert "deepseek" in manager.available_providers
+    assert "claude" not in manager.available_providers
+
+
+@pytest.mark.parametrize("missing", ["disabled", "key", "models", "claude_cli"])
+def test_deepseek_unavailable_when_requirement_missing(missing: str) -> None:
+    cfg = DeepseekConfig(
+        enabled=missing != "disabled",
+        models=[] if missing == "models" else ["deepseek-v4-pro"],
+    )
+    runtime = resolve_deepseek_runtime(
+        cfg,
+        "" if missing == "key" else "secret",
+        reserved_models=frozenset({"opus", "gemini-2.5-pro", "grok-4.5"}),
+    )
+    manager = ProviderManager(
+        AgentConfig(),
+        deepseek_runtime=runtime,
+        claude_cli_runnable=missing != "claude_cli",
+    )
+    manager.apply_auth_results(
+        {"claude": AuthResult("claude", AuthStatus.INSTALLED)},
+        auth_status_enum=AuthStatus,
+        cli_service=MagicMock(),
+    )
+    assert "deepseek" not in manager.available_providers
+
+
+def test_deepseek_directive_default_and_active_name() -> None:
+    config = AgentConfig(
+        provider="deepseek", model="deepseek-v4-pro", deepseek=DeepseekConfig(enabled=True)
+    )
+    manager = ProviderManager(
+        config, deepseek_runtime=_deepseek_runtime(), claude_cli_runnable=True
+    )
+    assert manager.resolve_session_directive("deepseek") == (
+        "deepseek",
+        "deepseek-v4-pro",
+    )
+    assert manager.active_provider_name == "DeepSeek"
+
+
+def test_cached_codex_collision_disables_deepseek() -> None:
+    model = MagicMock(id="deepseek-v4-pro")
+    cache = MagicMock(models=[model])
+    manager = ProviderManager(
+        AgentConfig(),
+        deepseek_runtime=_deepseek_runtime(),
+        claude_cli_runnable=True,
+        codex_cache_fn=lambda: cache,
+    )
+    manager._available_providers = frozenset({"deepseek"})
+
+    manager.refresh_known_model_ids()
+
+    assert manager.models.deepseek_models == frozenset()
+    assert "deepseek" not in manager.available_providers
 
 
 # ---------------------------------------------------------------------------

@@ -12,11 +12,25 @@ from ductor_bot.background import (
     BackgroundSubmit,
     BackgroundTask,
 )
+from ductor_bot.cli.deepseek import (
+    DeepseekRuntime,
+    load_deepseek_api_key,
+    resolve_deepseek_runtime,
+)
 from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.cli.service import CLIService, CLIServiceConfig
 from ductor_bot.cli.stream_events import ToolUseEvent
 from ductor_bot.cli.types import AgentRequest
-from ductor_bot.config import AgentConfig
+from ductor_bot.config import (
+    _GEMINI_ALIASES,
+    ANTIGRAVITY_MODELS,
+    CLAUDE_MODELS,
+    GROK_MODELS,
+    AgentConfig,
+    get_antigravity_models,
+    get_gemini_models,
+    get_grok_models,
+)
 from ductor_bot.cron.manager import CronManager
 from ductor_bot.errors import (
     CLIError,
@@ -123,7 +137,7 @@ class _MessageDispatch:
 class Orchestrator:
     """Routes messages through command dispatch and conversation flows."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         config: AgentConfig,
         paths: DuctorPaths,
@@ -131,36 +145,26 @@ class Orchestrator:
         docker_container: str = "",
         agent_name: str = "main",
         interagent_port: int = 8799,
+        claude_cli_is_runnable: bool = False,
     ) -> None:
         self._config = config
         self._paths: DuctorPaths = paths
         self._docker: DockerManager | None = None
-        self._providers = ProviderManager(config)
+        self._agent_name = agent_name
+        self._interagent_port = interagent_port
+        self._deepseek_api_key = load_deepseek_api_key(paths)
+        deepseek_runtime = self._resolve_deepseek_runtime(config)
+        self._providers = ProviderManager(
+            config,
+            deepseek_runtime=deepseek_runtime,
+            claude_cli_runnable=claude_cli_is_runnable,
+        )
         self._sessions = SessionManager(paths.sessions_path, config)
         self._named_sessions = NamedSessionRegistry(paths.named_sessions_path)
         self._process_registry = ProcessRegistry()
         self._lock_pool: LockPool | None = None
         self._cli_service = CLIService(
-            config=CLIServiceConfig(
-                working_dir=str(paths.workspace),
-                default_model=config.model,
-                provider=config.provider,
-                max_turns=config.max_turns,
-                max_budget_usd=config.max_budget_usd,
-                permission_mode=config.permission_mode,
-                reasoning_effort=config.reasoning_effort,
-                gemini_api_key=config.gemini_api_key,
-                docker_container=docker_container,
-                claude_cli_parameters=tuple(config.cli_parameters.claude),
-                codex_cli_parameters=tuple(config.cli_parameters.codex),
-                gemini_cli_parameters=tuple(config.cli_parameters.gemini),
-                antigravity_cli_parameters=tuple(config.cli_parameters.antigravity),
-                grok_cli_parameters=tuple(config.cli_parameters.grok),
-                agent_name=agent_name,
-                interagent_port=interagent_port,
-                transcribe_command=config.transcription.audio_command,
-                video_transcribe_command=config.transcription.video_command,
-            ),
+            config=self._build_cli_service_config(config, docker_container),
             models=self._providers.models,
             available_providers=frozenset(),
             process_registry=self._process_registry,
@@ -208,6 +212,56 @@ class Orchestrator:
         self._supervisor: AgentSupervisor | None = None  # Set by AgentSupervisor after creation
         self._command_registry = CommandRegistry()
         self._register_commands()
+
+    def _reserved_deepseek_models(self) -> frozenset[str]:
+        return (
+            CLAUDE_MODELS
+            | _GEMINI_ALIASES
+            | ANTIGRAVITY_MODELS
+            | GROK_MODELS
+            | get_gemini_models()
+            | get_antigravity_models()
+            | get_grok_models()
+        )
+
+    def _resolve_deepseek_runtime(self, config: AgentConfig) -> DeepseekRuntime:
+        return resolve_deepseek_runtime(
+            config.deepseek,
+            self._deepseek_api_key,
+            reserved_models=self._reserved_deepseek_models(),
+        )
+
+    def _build_cli_service_config(
+        self,
+        config: AgentConfig,
+        docker_container: str,
+    ) -> CLIServiceConfig:
+        runtime = (
+            self._providers.deepseek_runtime
+            if hasattr(self, "_providers")
+            else self._resolve_deepseek_runtime(config)
+        )
+        return CLIServiceConfig(
+            working_dir=str(self._paths.workspace),
+            default_model=config.model,
+            provider=config.provider,
+            max_turns=config.max_turns,
+            max_budget_usd=config.max_budget_usd,
+            permission_mode=config.permission_mode,
+            reasoning_effort=config.reasoning_effort,
+            gemini_api_key=config.gemini_api_key,
+            docker_container=docker_container,
+            claude_cli_parameters=tuple(config.cli_parameters.claude),
+            codex_cli_parameters=tuple(config.cli_parameters.codex),
+            gemini_cli_parameters=tuple(config.cli_parameters.gemini),
+            antigravity_cli_parameters=tuple(config.cli_parameters.antigravity),
+            grok_cli_parameters=tuple(config.cli_parameters.grok),
+            agent_name=self._agent_name,
+            interagent_port=self._interagent_port,
+            transcribe_command=config.transcription.audio_command,
+            video_transcribe_command=config.transcription.video_command,
+            deepseek=runtime,
+        )
 
     def _resolve_request_working_dir(self, request: AgentRequest) -> str | None:
         """Map a CLI request to a per-topic project root, if configured.
@@ -738,6 +792,9 @@ class Orchestrator:
 
     def _on_config_hot_reload(self, config: AgentConfig, hot: dict[str, object]) -> None:
         """Apply hot-reloaded config fields to dependent services."""
+        if "deepseek" in hot:
+            runtime = self._resolve_deepseek_runtime(config)
+            self._providers.refresh_deepseek(runtime, self._cli_service)
         if any(
             k in hot
             for k in (
@@ -748,25 +805,13 @@ class Orchestrator:
                 "permission_mode",
                 "reasoning_effort",
                 "cli_parameters",
+                "deepseek",
             )
         ):
             self._cli_service.update_config(
-                CLIServiceConfig(
-                    working_dir=str(self._paths.workspace),
-                    default_model=config.model,
-                    provider=config.provider,
-                    max_turns=config.max_turns,
-                    max_budget_usd=config.max_budget_usd,
-                    permission_mode=config.permission_mode,
-                    reasoning_effort=config.reasoning_effort,
-                    gemini_api_key=config.gemini_api_key,
-                    docker_container=self._cli_service._config.docker_container,
-                    claude_cli_parameters=tuple(config.cli_parameters.claude),
-                    codex_cli_parameters=tuple(config.cli_parameters.codex),
-                    gemini_cli_parameters=tuple(config.cli_parameters.gemini),
-                    antigravity_cli_parameters=tuple(config.cli_parameters.antigravity),
-                    transcribe_command=config.transcription.audio_command,
-                    video_transcribe_command=config.transcription.video_command,
+                self._build_cli_service_config(
+                    config,
+                    self._cli_service._config.docker_container,
                 )
             )
 

@@ -10,7 +10,7 @@ import pytest
 from ductor_bot.bus.bus import MessageBus
 from ductor_bot.cli.auth import AuthResult, AuthStatus
 from ductor_bot.cli.types import AgentResponse
-from ductor_bot.config import AgentConfig
+from ductor_bot.config import AgentConfig, DeepseekConfig
 from ductor_bot.errors import CLIError, CronError, SessionError, StreamError, WorkspaceError
 from ductor_bot.orchestrator.core import NamedSessionRequest, Orchestrator
 from ductor_bot.session.key import SessionKey
@@ -31,6 +31,23 @@ def _mock_response(**kwargs: object) -> AgentResponse:
     }
     defaults.update(kwargs)
     return AgentResponse(**defaults)  # type: ignore[arg-type]
+
+
+def test_deepseek_hot_reload_reuses_startup_captured_key(orch: Orchestrator) -> None:
+    orch._deepseek_api_key = "startup-key"
+    orch._providers._claude_cli_runnable = True
+    config = AgentConfig(
+        deepseek=DeepseekConfig(enabled=True, models=["deepseek-hot"]),
+    )
+    with patch(
+        "ductor_bot.orchestrator.core.load_deepseek_api_key",
+        side_effect=AssertionError("hot reload must not reread .env"),
+    ):
+        orch._on_config_hot_reload(config, {"deepseek": config.deepseek.model_dump()})
+
+    assert orch.models.deepseek_models == frozenset({"deepseek-hot"})
+    updated = orch._cli_service.update_config.call_args.args[0]
+    assert updated.deepseek.api_key == "startup-key"
 
 
 # -- command dispatch --

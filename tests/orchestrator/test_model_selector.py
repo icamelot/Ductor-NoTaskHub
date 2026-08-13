@@ -55,11 +55,16 @@ _CODEX_MODELS = [
 ]
 
 
-def _patch_auth(auth_map: dict[str, AuthResult]) -> Any:
-    return patch(
-        "ductor_bot.orchestrator.selectors.model_selector.check_all_auth",
-        return_value=auth_map,
+@contextmanager
+def _patch_auth(orch: Orchestrator, auth_map: dict[str, AuthResult]) -> Any:
+    previous = orch._providers._available_providers
+    orch._providers._available_providers = frozenset(
+        name for name, result in auth_map.items() if result.status == AuthStatus.AUTHENTICATED
     )
+    try:
+        yield
+    finally:
+        orch._providers._available_providers = previous
 
 
 @pytest.fixture(autouse=True)
@@ -101,7 +106,7 @@ def test_prefix_detection() -> None:
 
 async def test_start_no_providers(orch: Orchestrator) -> None:
     with _patch_auth(
-        {"claude": _NOT_FOUND_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
+        orch, {"claude": _NOT_FOUND_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "No authenticated providers" in resp.text
@@ -110,7 +115,7 @@ async def test_start_no_providers(orch: Orchestrator) -> None:
 
 async def test_start_one_provider_claude(orch: Orchestrator) -> None:
     with _patch_auth(
-        {"claude": _AUTHED_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
+        orch, {"claude": _AUTHED_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Select Claude model" in resp.text
@@ -124,7 +129,7 @@ async def test_start_one_provider_claude(orch: Orchestrator) -> None:
 async def test_start_one_provider_claude_includes_1m_variants(orch: Orchestrator) -> None:
     """/model selector surfaces SONNET[1M] + OPUS[1M] buttons for Claude (#76)."""
     with _patch_auth(
-        {"claude": _AUTHED_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
+        orch, {"claude": _AUTHED_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert resp.buttons is not None
@@ -139,7 +144,7 @@ async def test_start_one_provider_claude_includes_1m_variants(orch: Orchestrator
 async def test_start_one_provider_codex(orch: Orchestrator) -> None:
     with (
         _patch_auth(
-            {"claude": _NOT_FOUND_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
+            orch, {"claude": _NOT_FOUND_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
         ),
         _with_codex_cache(orch),
     ):
@@ -152,7 +157,7 @@ async def test_start_shows_configured_model_without_runtime_fallback(orch: Orche
     orch._providers._available_providers = frozenset({"codex"})
     with (
         _patch_auth(
-            {"claude": _NOT_FOUND_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
+            orch, {"claude": _NOT_FOUND_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
         ),
         _with_codex_cache(orch),
     ):
@@ -164,7 +169,7 @@ async def test_start_shows_configured_model_without_runtime_fallback(orch: Orche
 
 async def test_start_two_providers(orch: Orchestrator) -> None:
     with _patch_auth(
-        {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
+        orch, {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Model Selector" in resp.text
@@ -172,6 +177,27 @@ async def test_start_two_providers(orch: Orchestrator) -> None:
     labels = [btn.text for row in resp.buttons.rows for btn in row]
     assert "CLAUDE" in labels
     assert "CODEX" in labels
+
+
+async def test_selector_lists_deepseek_as_separate_provider(orch: Orchestrator) -> None:
+    orch.models.configure_deepseek(("deepseek-v4-pro", "deepseek-v4-flash"))
+    orch._providers._available_providers = frozenset({"claude", "deepseek"})
+    resp = await model_selector_start(orch, SessionKey(chat_id=1))
+    assert resp.buttons is not None
+    assert any(button.text == "DEEPSEEK" for row in resp.buttons.rows for button in row)
+
+
+async def test_callback_provider_deepseek_lists_only_configured_models(
+    orch: Orchestrator,
+) -> None:
+    orch.models.configure_deepseek(("deepseek-v4-pro", "deepseek-v4-flash"))
+    resp = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:p:deepseek")
+    assert "Select DeepSeek model" in resp.text
+    assert resp.buttons is not None
+    callbacks = [button.callback_data for row in resp.buttons.rows for button in row]
+    assert "ms:m:deepseek-v4-pro" in callbacks
+    assert "ms:m:deepseek-v4-flash" in callbacks
+    assert "ms:m:opus" not in callbacks
 
 
 async def test_start_one_provider_gemini_uses_discovered_models(orch: Orchestrator) -> None:
@@ -185,7 +211,7 @@ async def test_start_one_provider_gemini_uses_discovered_models(orch: Orchestrat
         )
     )
     with _patch_auth(
-        {"claude": _NOT_FOUND_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _AUTHED_GEMINI}
+        orch, {"claude": _NOT_FOUND_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _AUTHED_GEMINI}
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Select Gemini model" in resp.text
@@ -199,7 +225,7 @@ async def test_start_one_provider_gemini_uses_discovered_models(orch: Orchestrat
 async def test_start_one_provider_gemini_includes_builtin_aliases(orch: Orchestrator) -> None:
     set_gemini_models(frozenset({"gemini-2.5-pro", "gemini-2.5-flash"}))
     with _patch_auth(
-        {"claude": _NOT_FOUND_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _AUTHED_GEMINI}
+        orch, {"claude": _NOT_FOUND_CLAUDE, "codex": _NOT_FOUND_CODEX, "gemini": _AUTHED_GEMINI}
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert resp.buttons is not None
@@ -213,12 +239,13 @@ async def test_start_one_provider_gemini_includes_builtin_aliases(orch: Orchestr
 
 async def test_start_one_provider_antigravity(orch: Orchestrator) -> None:
     with _patch_auth(
+        orch,
         {
             "claude": _NOT_FOUND_CLAUDE,
             "codex": _NOT_FOUND_CODEX,
             "gemini": _NOT_FOUND_GEMINI,
             "antigravity": _AUTHED_ANTIGRAVITY,
-        }
+        },
     ):
         resp = await model_selector_start(orch, SessionKey(chat_id=1))
     assert "Select Antigravity model" in resp.text
@@ -457,7 +484,7 @@ async def test_callback_reasoning_stale_target_bucket_targets_next_message(
 
 async def test_callback_back_root(orch: Orchestrator) -> None:
     with _patch_auth(
-        {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
+        orch, {"claude": _AUTHED_CLAUDE, "codex": _AUTHED_CODEX, "gemini": _NOT_FOUND_GEMINI}
     ):
         resp = await handle_model_callback(orch, SessionKey(chat_id=1), "ms:b:root")
     assert resp.buttons is not None
@@ -486,6 +513,16 @@ async def test_switch_model_basic(orch: Orchestrator) -> None:
     assert orch._config.model == "sonnet"
     mock_kill.assert_called_once_with(1, None)
     mock_reset.assert_not_called()
+
+
+async def test_direct_model_selection_rejects_unavailable_deepseek(
+    orch: Orchestrator,
+) -> None:
+    orch.models.configure_deepseek(("deepseek-v4-pro",))
+    orch._providers._available_providers = frozenset({"claude"})
+    result = await switch_model(orch, SessionKey(chat_id=1), "deepseek-v4-pro")
+    assert "not available" in result.lower()
+    assert orch._config.model == "opus"
 
 
 async def test_switch_model_topic_does_not_change_global_defaults(orch: Orchestrator) -> None:

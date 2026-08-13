@@ -7,7 +7,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ductor_bot.cli.auth import AuthStatus, check_all_auth
 from ductor_bot.config import (
     ANTIGRAVITY_MODELS_ORDERED,
     CLAUDE_MODELS_ORDERED,
@@ -112,7 +111,7 @@ def _supported_efforts(orch: Orchestrator, model_id: str) -> tuple[str, ...]:
     rejected. Other providers don't use reasoning effort.
     """
     provider = orch.models.provider_for(model_id)
-    if provider == "claude":
+    if provider in {"claude", "deepseek"}:
         return CLAUDE_SUPPORTED_EFFORTS
     if provider == "grok":
         return GROK_SUPPORTED_EFFORTS
@@ -140,7 +139,7 @@ def _validate_reasoning_effort(
     """
     if not reasoning_effort:
         return None
-    if orch.models.provider_for(model_id) not in ("codex", "claude", "grok"):
+    if orch.models.provider_for(model_id) not in ("codex", "claude", "deepseek", "grok"):
         return None
 
     supported = _supported_efforts(orch, model_id)
@@ -224,33 +223,39 @@ async def model_selector_start(
     Returns a ``SelectorResponse``. Buttons are ``None`` when no providers
     are authenticated.
     """
-    auth = await asyncio.to_thread(check_all_auth)
-    authed = [name for name, res in auth.items() if res.status == AuthStatus.AUTHENTICATED]
+    available = sorted(orch.available_providers)
 
     header = await _status_line(orch, key)
 
-    if not authed:
+    if not available:
         return SelectorResponse(
             text=f"{header}\n\n{t('model.no_auth')}",
         )
 
-    if len(authed) == 1:
-        provider = authed[0]
+    if len(available) == 1:
+        provider = available[0]
         codex_cache = (
             orch._observers.codex_cache_obs.get_cache() if orch._observers.codex_cache_obs else None
         )
-        return await _build_model_step(provider, header, codex_cache)
+        return await _build_model_step(
+            provider,
+            header,
+            codex_cache,
+            deepseek_models=tuple(sorted(orch.models.deepseek_models)),
+        )
 
     buttons: list[Button] = []
-    if "claude" in authed:
+    if "claude" in available:
         buttons.append(Button(text="CLAUDE", callback_data="ms:p:claude"))
-    if "codex" in authed:
+    if "deepseek" in available:
+        buttons.append(Button(text="DEEPSEEK", callback_data="ms:p:deepseek"))
+    if "codex" in available:
         buttons.append(Button(text="CODEX", callback_data="ms:p:codex"))
-    if "gemini" in authed:
+    if "gemini" in available:
         buttons.append(Button(text="GEMINI", callback_data="ms:p:gemini"))
-    if "antigravity" in authed:
+    if "antigravity" in available:
         buttons.append(Button(text="ANTIGRAVITY", callback_data="ms:p:antigravity"))
-    if "grok" in authed:
+    if "grok" in available:
         buttons.append(Button(text="GROK BUILD", callback_data="ms:p:grok"))
 
     provider_rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
@@ -315,7 +320,12 @@ async def handle_model_callback(  # noqa: PLR0911
     )
 
     if action == "p":
-        return await _build_model_step(payload, await _status_line(orch, key), codex_cache)
+        return await _build_model_step(
+            payload,
+            await _status_line(orch, key),
+            codex_cache,
+            deepseek_models=tuple(sorted(orch.models.deepseek_models)),
+        )
 
     if action == "m":
         return await _handle_model_selected(orch, key, payload)
@@ -329,7 +339,12 @@ async def handle_model_callback(  # noqa: PLR0911
     if action == "b":
         if payload == "root":
             return await model_selector_start(orch, key)
-        return await _build_model_step(payload, await _status_line(orch, key), codex_cache)
+        return await _build_model_step(
+            payload,
+            await _status_line(orch, key),
+            codex_cache,
+            deepseek_models=tuple(sorted(orch.models.deepseek_models)),
+        )
 
     logger.warning("Unknown model selector callback: %s", data)
     return SelectorResponse(text=t("model.unknown_action"))
@@ -434,6 +449,9 @@ async def switch_model(
     # still syncs the session), while the `if not is_topic:` block below keeps
     # updating the global default only from the main chat.
     old = active_session.model if active_session else orch._config.model
+    new_provider = orch.models.provider_for(model_id)
+    if new_provider == "deepseek" and "deepseek" not in orch.available_providers:
+        return t("model.provider_unavailable", provider="DeepSeek")
     same_model = old == model_id
     effort_only = same_model and reasoning_effort is not None
 
@@ -444,7 +462,6 @@ async def switch_model(
         return t("model.already_running", model=model_id)
 
     old_provider = orch.models.provider_for(old)
-    new_provider = orch.models.provider_for(model_id)
     provider_changed = old_provider != new_provider
 
     validation_error = _validate_reasoning_effort(orch, model_id, reasoning_effort)
@@ -502,7 +519,7 @@ async def switch_model(
             # Codex and Claude both use reasoning_effort — only drop it when
             # switching to a provider that has no notion of effort.
             if (
-                new_provider not in {"codex", "claude", "grok"}
+                new_provider not in {"codex", "claude", "deepseek", "grok"}
                 and "reasoning_effort" not in registry_updates
             ):
                 registry_updates["reasoning_effort"] = None
@@ -548,7 +565,7 @@ async def _status_line(orch: Orchestrator, key: SessionKey) -> str:
         model, provider = orch.resolve_runtime_target(orch._config.model)
         effort = orch._config.reasoning_effort
 
-    if provider in ("codex", "claude", "grok") and effort and effort != "default":
+    if provider in ("codex", "claude", "deepseek", "grok") and effort and effort != "default":
         current = (
             f"{t('model.header')}\n{t('model.current_with_effort', model=model, effort=effort)}"
         )
@@ -567,14 +584,21 @@ async def _build_model_step(
     provider: str,
     header: str,
     codex_cache: CodexModelCache | None = None,
+    *,
+    deepseek_models: tuple[str, ...] = (),
 ) -> SelectorResponse:
     """Build the model selection keyboard for a provider."""
-    if provider in ("claude", "grok"):
+    if provider in ("claude", "deepseek", "grok"):
         if provider == "claude":
             buttons = [
                 Button(text=m.upper(), callback_data=f"ms:m:{m}") for m in CLAUDE_MODELS_ORDERED
             ]
             prompt = t("model.select_claude")
+        elif provider == "deepseek":
+            buttons = [
+                Button(text=model, callback_data=f"ms:m:{model}") for model in deepseek_models
+            ]
+            prompt = t("model.select_deepseek")
         else:
             buttons = [Button(text=m, callback_data=f"ms:m:{m}") for m in get_grok_models_ordered()]
             prompt = t("model.select_grok")

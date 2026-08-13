@@ -20,7 +20,7 @@ from ductor_bot.config import (
     get_gemini_models,
 )
 
-_TASK_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "gemini", "grok"})
+_TASK_PROVIDERS: frozenset[str] = frozenset({"claude", "deepseek", "codex", "gemini", "grok"})
 
 
 def _looks_like_gemini_model(model: str) -> bool:
@@ -111,9 +111,13 @@ def _resolve_reasoning_effort(
         return ""
 
     explicit = overrides.reasoning_effort is not None
-    if provider == "claude":
+    if provider in {"claude", "deepseek"}:
         return _static_effort(
-            requested_effort, CLAUDE_SUPPORTED_EFFORTS, "Claude", model, explicit=explicit
+            requested_effort,
+            CLAUDE_SUPPORTED_EFFORTS,
+            "DeepSeek" if provider == "deepseek" else "Claude",
+            model,
+            explicit=explicit,
         )
     if provider == "grok":
         return _static_effort(
@@ -179,6 +183,11 @@ def resolve_cli_config(
         if model not in CLAUDE_MODELS:
             msg = f"Invalid Claude model: {model}. Must be one of {sorted(CLAUDE_MODELS)}"
             raise DuctorError(msg)
+    elif provider == "deepseek":
+        deepseek_models = tuple(model_id.strip() for model_id in base_config.deepseek.models)
+        if model not in deepseek_models:
+            msg = f"Invalid DeepSeek model: {model}. Must be one of {sorted(deepseek_models)}"
+            raise DuctorError(msg)
     elif provider == "gemini":
         _validate_gemini_model(model)
     elif provider == "grok":
@@ -209,7 +218,8 @@ def resolve_cli_config(
     #    per-provider fields. Mirrors the foreground pattern in orchestrator/core.py.
     #    getattr+None fallback keeps this forward-compatible if a new provider is
     #    added without a matching bucket.
-    base_params = getattr(base_config.cli_parameters, provider, None) or []
+    parameter_provider = "claude" if provider == "deepseek" else provider
+    base_params = getattr(base_config.cli_parameters, parameter_provider, None) or []
     cli_parameters = [*base_params, *overrides.cli_parameters]
 
     # 6. Return immutable config

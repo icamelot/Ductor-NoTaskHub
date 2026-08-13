@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ductor_bot.cli.deepseek import DeepseekRuntime
 from ductor_bot.config import (
     AgentConfig,
     reset_antigravity_models,
@@ -40,6 +41,30 @@ def _make_provider_manager(
         codex_obs.get_cache.return_value = cache
 
     return pm, codex_obs
+
+
+def test_deepseek_metadata_is_logical_and_redaction_safe() -> None:
+    runtime = DeepseekRuntime(
+        requested=True,
+        base_url="https://private.example/anthropic",
+        models=("deepseek-v4-pro", "deepseek-v4-flash"),
+        api_key="private-key",
+    )
+    pm = ProviderManager(AgentConfig(), deepseek_runtime=runtime, claude_cli_runnable=True)
+    pm._available_providers = frozenset({"deepseek"})
+
+    info = pm.build_provider_info()
+
+    assert info == [
+        {
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "color": "#4D6BFE",
+            "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        }
+    ]
+    assert "private-key" not in repr(info)
+    assert "private.example" not in repr(info)
 
 
 class TestBuildProviderInfo:

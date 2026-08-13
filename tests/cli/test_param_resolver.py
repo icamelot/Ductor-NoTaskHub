@@ -94,6 +94,40 @@ def test_resolve_with_task_overrides(
     assert result.cli_parameters == []
 
 
+def test_resolve_deepseek_reuses_claude_effort_and_parameters(
+    base_config: AgentConfig, codex_cache: CodexModelCache
+) -> None:
+    base_config.deepseek.enabled = True
+    base_config.deepseek.models = ["deepseek-v4-pro", "deepseek-v4-flash"]
+    base_config.cli_parameters = CLIParametersConfig(claude=["--verbose"])
+    overrides = TaskOverrides(
+        provider="deepseek",
+        model="deepseek-v4-pro",
+        reasoning_effort="max",
+        cli_parameters=["--debug"],
+    )
+
+    result = resolve_cli_config(base_config, codex_cache, task_overrides=overrides)
+
+    assert result.provider == "deepseek"
+    assert result.model == "deepseek-v4-pro"
+    assert result.reasoning_effort == "max"
+    assert result.cli_parameters == ["--verbose", "--debug"]
+
+
+def test_resolve_deepseek_rejects_unconfigured_model(
+    base_config: AgentConfig, codex_cache: CodexModelCache
+) -> None:
+    base_config.deepseek.enabled = True
+    base_config.deepseek.models = ["deepseek-v4-pro"]
+    with pytest.raises(DuctorError, match="Invalid DeepSeek model"):
+        resolve_cli_config(
+            base_config,
+            codex_cache,
+            task_overrides=TaskOverrides(provider="deepseek", model="deepseek-unknown"),
+        )
+
+
 def test_resolve_merge_parameters(base_config: AgentConfig, codex_cache: CodexModelCache) -> None:
     """Should append task-specific CLI parameters after global provider parameters."""
     base_config.cli_parameters = CLIParametersConfig(claude=["--global-param", "global-value"])
