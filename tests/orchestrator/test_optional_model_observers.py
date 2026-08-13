@@ -5,7 +5,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from ductor_bot.cli.codex_cache import CodexModelCache
+from ductor_bot.cli.deepseek import DeepseekRuntime
+from ductor_bot.config import AgentConfig
 from ductor_bot.orchestrator.observers import ObserverManager
+from ductor_bot.workspace.paths import DuctorPaths
 
 
 def _manager() -> ObserverManager:
@@ -104,3 +107,41 @@ async def test_installed_but_unauthenticated_provider_still_gets_observer() -> N
     agy_cls.assert_not_called()
     grok_cls.assert_not_called()
     codex_observer.start.assert_awaited_once()
+
+
+async def test_claude_keepalive_starts_only_for_enabled_main(tmp_path) -> None:
+    runtime = DeepseekRuntime(False, "", (), error="disabled")
+    for is_main, enabled, expected in (
+        (True, True, 1),
+        (True, False, 0),
+        (False, True, 0),
+    ):
+        manager = ObserverManager(
+            AgentConfig(claude_token_keepalive=enabled),
+            DuctorPaths(ductor_home=tmp_path / f"{is_main}-{enabled}"),
+        )
+        manager.heartbeat.start = AsyncMock()
+        manager.heartbeat.stop = AsyncMock()
+        manager.cleanup.start = AsyncMock()
+        manager.cleanup.stop = AsyncMock()
+        keepalive = MagicMock()
+        keepalive.start = AsyncMock()
+        keepalive.stop = AsyncMock()
+        with (
+            patch(
+                "ductor_bot.orchestrator.observers.ClaudeTokenKeepalive",
+                return_value=keepalive,
+            ) as keepalive_cls,
+            patch("ductor_bot.orchestrator.observers.watch_rule_files", new_callable=AsyncMock),
+            patch("ductor_bot.orchestrator.observers.watch_skill_sync", new_callable=AsyncMock),
+        ):
+            await manager.start_all(
+                is_main=is_main,
+                deepseek_runtime=runtime,
+                usage_service=MagicMock(),
+            )
+            await manager.stop_all()
+
+        assert keepalive_cls.call_count == expected
+        assert keepalive.start.await_count == expected
+        assert keepalive.stop.await_count == expected

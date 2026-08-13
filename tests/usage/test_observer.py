@@ -104,7 +104,10 @@ async def _start_manager(
     is_main: bool,
     runtime: DeepseekRuntime,
 ) -> tuple[ObserverManager, MagicMock, AsyncMock]:
-    manager = ObserverManager(AgentConfig(), DuctorPaths(ductor_home=tmp_path))
+    manager = ObserverManager(
+        AgentConfig(claude_token_keepalive=False),
+        DuctorPaths(ductor_home=tmp_path),
+    )
     manager.heartbeat.start = AsyncMock()
     manager.heartbeat.stop = AsyncMock()
     manager.cleanup.start = AsyncMock()

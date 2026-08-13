@@ -49,7 +49,7 @@ def workspace(tmp_path: Path) -> tuple[DuctorPaths, AgentConfig]:
         ductor_home=tmp_path / "home", home_defaults=fw_root / "workspace", framework_root=fw_root
     )
     init_workspace(paths)
-    config = AgentConfig()
+    config = AgentConfig(claude_token_keepalive=False)
     return paths, config
 
 

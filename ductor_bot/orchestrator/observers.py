@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from ductor_bot.bus.bus import MessageBus
 from ductor_bot.cleanup import CleanupObserver
 from ductor_bot.cli.antigravity_cache_observer import AntigravityCacheObserver
+from ductor_bot.cli.claude_token_keepalive import ClaudeTokenKeepalive
 from ductor_bot.cli.codex_cache import CodexModelCache
 from ductor_bot.cli.codex_cache_observer import CodexCacheObserver
 from ductor_bot.cli.deepseek import DeepseekRuntime
@@ -70,6 +71,7 @@ class ObserverManager:
         self.antigravity_cache_obs: AntigravityCacheObserver | None = None
         self.grok_cache_obs: GrokCacheObserver | None = None
         self.deepseek_balance: DeepSeekBalanceObserver | None = None
+        self.claude_token_keepalive: ClaudeTokenKeepalive | None = None
         self.balance_repository = BalanceSnapshotRepository(
             paths.deepseek_balance_snapshots_path,
             paths.legacy_balance_snapshots_path,
@@ -195,6 +197,9 @@ class ObserverManager:
             deepseek_runtime,
             resolve_user_timezone(self._config.user_timezone),
         )
+        if is_main and self._config.claude_token_keepalive:
+            self.claude_token_keepalive = ClaudeTokenKeepalive(self._paths.claude_credentials_path)
+            await self.claude_token_keepalive.start()
         if self.cron:
             await self.cron.start()
         await self.heartbeat.start()
@@ -227,11 +232,9 @@ class ObserverManager:
 
     async def stop_all(self) -> None:
         """Stop all background observers and caches."""
-        if self.deepseek_balance:
-            await self.deepseek_balance.stop()
-            self.deepseek_balance = None
         if self._config_reloader:
             await self._config_reloader.stop()
+        await self._stop_usage_observers()
         if self.background:
             await self.background.shutdown()
         await self.heartbeat.stop()
@@ -256,6 +259,14 @@ class ObserverManager:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+
+    async def _stop_usage_observers(self) -> None:
+        if self.deepseek_balance:
+            await self.deepseek_balance.stop()
+            self.deepseek_balance = None
+        if self.claude_token_keepalive:
+            await self.claude_token_keepalive.stop()
+            self.claude_token_keepalive = None
 
     async def reconfigure_deepseek(
         self,
