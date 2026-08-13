@@ -1818,6 +1818,7 @@ git commit -m "feat(usage): expose localized cross-transport usage"
 - Create: `tests/cli/test_claude_token_keepalive.py`
 - Modify: `ductor_bot/orchestrator/observers.py`
 - Modify: `ductor_bot/orchestrator/lifecycle.py`
+- Test: `tests/usage/test_observer.py`
 
 **Interfaces:**
 
