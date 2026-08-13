@@ -1422,6 +1422,7 @@ git commit -m "feat(usage): aggregate and format provider usage"
 - Modify: `ductor_bot/i18n/{de,en,es,fr,id,nl,pt,ru}/commands.toml`
 - Modify: `ductor_bot/i18n/{de,en,es,fr,id,nl,pt,ru}/chat.toml`
 - Test: `tests/orchestrator/test_commands.py`
+- Test: `tests/orchestrator/test_core.py`
 - Test: `tests/orchestrator/test_registry.py`
 - Test: `tests/messenger/test_commands.py`
 - Test: `tests/messenger/telegram/test_app.py`
