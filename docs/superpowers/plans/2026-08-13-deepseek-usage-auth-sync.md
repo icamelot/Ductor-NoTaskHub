@@ -565,6 +565,8 @@ git commit -m "feat(deepseek): delegate isolated turns to Claude CLI"
 - Test: `tests/orchestrator/test_core_provider_info.py`
 - Test: `tests/orchestrator/test_core.py`
 - Test: `tests/cli/test_param_resolver.py`
+- Test: `tests/cli/test_grok_provider.py`
+- Test: `tests/cli/test_grok_discovery.py`
 
 **Interfaces:**
 
@@ -713,7 +715,8 @@ git add ductor_bot/orchestrator ductor_bot/cli/param_resolver.py \
   ductor_bot/i18n/{de,en,es,fr,id,nl,pt,ru}/chat.toml \
   tests/orchestrator/test_providers.py tests/orchestrator/test_model_selector.py \
   tests/orchestrator/test_core_provider_info.py tests/orchestrator/test_core.py \
-  tests/cli/test_param_resolver.py
+  tests/cli/test_param_resolver.py tests/cli/test_grok_provider.py \
+  tests/cli/test_grok_discovery.py
 git commit -m "feat(deepseek): integrate availability and model selection"
 ```
 
