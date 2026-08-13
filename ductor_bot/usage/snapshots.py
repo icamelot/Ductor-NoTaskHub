@@ -255,7 +255,9 @@ class BalanceSnapshotRepository:
         return True
 
     def _load_locked(self) -> tuple[BalanceSnapshot, ...]:
-        return tuple(self._initialize_locked().snapshots)
+        if not self._path.exists():
+            return ()
+        return tuple(self._read_current().snapshots)
 
     def _today_deltas_locked(
         self,
@@ -265,9 +267,12 @@ class BalanceSnapshotRepository:
     ) -> tuple[BalanceDelta, ...]:
         if now.tzinfo is None:
             raise SnapshotUnavailable
-        snapshots = [
-            item for item in self._initialize_locked().snapshots if item.captured_at <= now
-        ]
+        document = (
+            self._read_current()
+            if self._path.exists()
+            else _Document(legacy_import_completed=True, snapshots=[])
+        )
+        snapshots = [item for item in document.snapshots if item.captured_at <= now]
         midnight = now.astimezone(timezone).replace(hour=0, minute=0, second=0, microsecond=0)
         midnight_utc = midnight.astimezone(UTC)
         result: list[BalanceDelta] = []

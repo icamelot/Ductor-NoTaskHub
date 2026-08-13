@@ -187,12 +187,13 @@ class ObserverManager:
         """Start all observers and background watchers."""
         self._is_main = is_main
         self._usage_service = usage_service
-        try:
-            await self.balance_repository.initialize()
-        except asyncio.CancelledError:
-            raise
-        except (OSError, SnapshotUnavailable):
-            logger.warning("DeepSeek balance initialization failed category=unavailable")
+        if is_main:
+            try:
+                await self.balance_repository.initialize()
+            except asyncio.CancelledError:
+                raise
+            except (OSError, SnapshotUnavailable):
+                logger.warning("DeepSeek balance initialization failed category=unavailable")
         await self.reconfigure_deepseek(
             deepseek_runtime,
             resolve_user_timezone(self._config.user_timezone),

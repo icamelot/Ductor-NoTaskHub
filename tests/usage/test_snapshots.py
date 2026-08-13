@@ -51,6 +51,23 @@ async def test_record_round_trips_decimal_strings(tmp_path: Path) -> None:
     assert await asyncio.to_thread(_temporary_files, tmp_path) == []
 
 
+async def test_missing_snapshot_reads_do_not_create_or_import_history(tmp_path: Path) -> None:
+    path = tmp_path / "snapshots.json"
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text(json.dumps([{"timestamp": "2026-08-12T00:00:00Z", "balance": "123.45"}]))
+    repository = BalanceSnapshotRepository(path, legacy)
+
+    assert await repository.load() == ()
+    deltas = await repository.today_deltas(
+        (Balance("CNY", Decimal(120)),),
+        timezone=ZoneInfo("UTC"),
+        now=datetime(2026, 8, 13, tzinfo=UTC),
+    )
+
+    assert deltas[0].kind == "unavailable"
+    assert not path.exists()
+
+
 @pytest.mark.parametrize(
     "document",
     [

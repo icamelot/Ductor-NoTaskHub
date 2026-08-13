@@ -146,6 +146,8 @@ async def test_manager_starts_balance_observer_only_for_configured_main(
 
     assert (manager.deepseek_balance is not None) is expected
     assert (fetch.await_count > 0) is expected
+    if not is_main:
+        assert not (tmp_path / "deepseek_balance_snapshots.json").exists()
     await manager.stop_all()
     assert manager.deepseek_balance is None
 
