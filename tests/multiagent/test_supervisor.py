@@ -323,6 +323,242 @@ class TestStartSubAgent:
 
         assert "sub1" not in supervisor._stacks
 
+    async def test_sync_writes_exact_runtime_fields_and_preserves_unrelated_config(
+        self,
+        supervisor: AgentSupervisor,
+        tmp_path: Path,
+    ) -> None:
+        config_path = tmp_path / "config.json"
+        original_docker = {"enabled": True, "image": "custom", "nested": {"keep": 1}}
+        config_path.write_text(
+            json.dumps(
+                {
+                    "provider": "claude",
+                    "model": "opus",
+                    "reasoning_effort": "low",
+                    "allowed_user_ids": [123456789],
+                    "allowed_group_ids": [-100123456789],
+                    "group_mention_only": True,
+                    "docker": original_docker,
+                }
+            )
+        )
+        runtime = AgentConfig(
+            provider="codex",
+            model="gpt-5.4",
+            reasoning_effort="high",
+            allowed_user_ids=[7739164762],
+            allowed_group_ids=[],
+            group_mention_only=False,
+        )
+
+        await supervisor._sync_sub_agent_config(config_path, runtime)
+
+        written = json.loads(config_path.read_text())
+        assert written["provider"] == "codex"
+        assert written["model"] == "gpt-5.4"
+        assert written["reasoning_effort"] == "high"
+        assert written["allowed_user_ids"] == [7739164762]
+        assert written["allowed_group_ids"] == []
+        assert written["group_mention_only"] is False
+        assert written["docker"] == original_docker
+
+        runtime.model = "gpt-5.5"
+        await supervisor._sync_sub_agent_config(config_path, runtime)
+        reloaded = json.loads(config_path.read_text())
+        assert reloaded["model"] == "gpt-5.5"
+        assert reloaded["allowed_user_ids"] == [7739164762]
+        assert reloaded["allowed_group_ids"] == []
+        assert reloaded["group_mention_only"] is False
+
+    async def test_initial_start_syncs_before_registration_and_task_creation(
+        self,
+        supervisor: AgentSupervisor,
+        tmp_path: Path,
+    ) -> None:
+        order: list[str] = []
+        config_path = tmp_path / "sub1" / "config" / "config.json"
+        stack = MagicMock()
+        stack.paths.config_path = config_path
+        stack.bot.on_async_interagent_result = AsyncMock()
+        stack.shutdown = AsyncMock()
+
+        async def create(*_args: object, **_kwargs: object) -> MagicMock:
+            order.append("create")
+            return stack
+
+        async def sync(_path: Path, _config: AgentConfig) -> None:
+            order.append("sync")
+
+        bus = MagicMock()
+        bus.register.side_effect = lambda *_args: order.append("register")
+        supervisor._bus = bus
+
+        def create_task(coro: object, *, name: str) -> MagicMock:
+            assert name == "agent:sub1"
+            order.append("task")
+            coro.close()  # type: ignore[attr-defined]
+            return MagicMock()
+
+        with (
+            patch("ductor_bot.multiagent.supervisor.AgentStack.create", side_effect=create),
+            patch.object(supervisor, "_sync_sub_agent_config", side_effect=sync),
+            patch("ductor_bot.multiagent.supervisor.asyncio.create_task", side_effect=create_task),
+        ):
+            await supervisor._start_sub_agent(SubAgentConfig(name="sub1", telegram_token="tok:1"))
+
+        assert order == ["create", "sync", "register", "task"]
+
+    async def test_sync_failure_isolated_before_any_registration(
+        self,
+        supervisor: AgentSupervisor,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        main_stack = MagicMock()
+        supervisor._stacks["main"] = main_stack
+        supervisor._health["main"] = AgentHealth(name="main")
+        supervisor._registry.load = MagicMock(
+            return_value=[
+                SubAgentConfig(
+                    name="sub1",
+                    telegram_token="tok:1",
+                    allowed_user_ids=[111111111],
+                ),
+                SubAgentConfig(
+                    name="sub2",
+                    telegram_token="tok:2",
+                    allowed_user_ids=[222222222],
+                ),
+            ]
+        )
+        stacks: dict[str, MagicMock] = {}
+
+        async def create(name: str, config: AgentConfig) -> MagicMock:
+            stack = MagicMock(config=config)
+            stack.paths.config_path = tmp_path / name / "config.json"
+            stack.bot.on_async_interagent_result = AsyncMock()
+            stack.shutdown = AsyncMock()
+            stacks[name] = stack
+            return stack
+
+        async def sync(_path: Path, config: AgentConfig) -> None:
+            if config.ductor_home.endswith("sub1"):
+                raise OSError("must-not-log [111111111]")
+
+        def create_task(coro: object, *, name: str) -> MagicMock:
+            coro.close()  # type: ignore[attr-defined]
+            return MagicMock(name=name)
+
+        supervisor._bus = MagicMock()
+        with (
+            patch("ductor_bot.multiagent.supervisor.AgentStack.create", side_effect=create),
+            patch.object(supervisor, "_sync_sub_agent_config", side_effect=sync),
+            patch("ductor_bot.multiagent.supervisor.asyncio.create_task", side_effect=create_task),
+        ):
+            await supervisor._sync_sub_agents()
+
+        assert supervisor._stacks["main"] is main_stack
+        assert "sub1" not in supervisor._stacks
+        assert "sub1" not in supervisor._health
+        assert "sub1" not in supervisor._tasks
+        assert supervisor._stacks["sub2"] is stacks["sub2"]
+        assert "sub2" in supervisor._health
+        assert "sub2" in supervisor._tasks
+        stacks["sub1"].shutdown.assert_awaited_once()
+        supervisor._bus.register.assert_called_once_with("sub2", stacks["sub2"])
+        assert "111111111" not in caplog.text
+        assert "Failed to synchronize sub-agent config name=sub1" in caplog.text
+
+
+class TestRebuildStack:
+    async def test_subagent_rebuild_syncs_before_bus_registration(
+        self,
+        supervisor: AgentSupervisor,
+        tmp_path: Path,
+    ) -> None:
+        order: list[str] = []
+        old_stack = MagicMock(
+            config=AgentConfig(ductor_home=str(tmp_path / "old")),
+            is_main=False,
+        )
+        new_stack = MagicMock(config=old_stack.config, is_main=False)
+        new_stack.paths.config_path = tmp_path / "new" / "config.json"
+        new_stack.bot.on_async_interagent_result = AsyncMock()
+
+        async def create(*_args: object, **_kwargs: object) -> MagicMock:
+            order.append("create")
+            return new_stack
+
+        async def sync(path: Path, config: AgentConfig) -> None:
+            assert path == new_stack.paths.config_path
+            assert config is new_stack.config
+            order.append("sync")
+
+        supervisor._bus = MagicMock()
+        supervisor._bus.register.side_effect = lambda *_args: order.append("register")
+        with (
+            patch("ductor_bot.multiagent.supervisor.AgentStack.create", side_effect=create),
+            patch.object(supervisor, "_sync_sub_agent_config", side_effect=sync),
+        ):
+            rebuilt = await supervisor._rebuild_stack("sub1", old_stack)
+
+        assert rebuilt is new_stack
+        assert order == ["create", "sync", "register"]
+
+    async def test_rebuild_sync_failure_propagates_without_replacing_stack(
+        self,
+        supervisor: AgentSupervisor,
+        tmp_path: Path,
+    ) -> None:
+        old_stack = MagicMock(
+            config=AgentConfig(ductor_home=str(tmp_path / "old")),
+            is_main=False,
+        )
+        new_stack = MagicMock(config=old_stack.config, is_main=False)
+        new_stack.paths.config_path = tmp_path / "new" / "config.json"
+        new_stack.shutdown = AsyncMock()
+        supervisor._stacks["sub1"] = old_stack
+        supervisor._bus = MagicMock()
+
+        with (
+            patch(
+                "ductor_bot.multiagent.supervisor.AgentStack.create",
+                new_callable=AsyncMock,
+                return_value=new_stack,
+            ),
+            patch.object(
+                supervisor,
+                "_sync_sub_agent_config",
+                new_callable=AsyncMock,
+                side_effect=OSError("sync failed"),
+            ),
+            pytest.raises(OSError, match="sync failed"),
+        ):
+            await supervisor._rebuild_stack("sub1", old_stack)
+
+        assert supervisor._stacks["sub1"] is old_stack
+        supervisor._bus.register.assert_not_called()
+        new_stack.shutdown.assert_awaited_once()
+
+    async def test_main_rebuild_does_not_sync_subagent_config(
+        self,
+        supervisor: AgentSupervisor,
+    ) -> None:
+        old_stack = MagicMock(config=AgentConfig(), is_main=True)
+        new_stack = MagicMock(config=old_stack.config, is_main=True)
+        with (
+            patch(
+                "ductor_bot.multiagent.supervisor.AgentStack.create",
+                new_callable=AsyncMock,
+                return_value=new_stack,
+            ),
+            patch.object(supervisor, "_sync_sub_agent_config", new_callable=AsyncMock) as sync,
+        ):
+            await supervisor._rebuild_stack("main", old_stack)
+
+        sync.assert_not_awaited()
+
 
 class TestStopAll:
     """Test stop_all() ordered shutdown."""

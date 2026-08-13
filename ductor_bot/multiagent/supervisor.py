@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ductor_bot.config import AgentConfig, update_config_file_async
@@ -419,6 +420,16 @@ class AgentSupervisor:
             old_stack.config,
             is_main=old_stack.is_main,
         )
+        if not old_stack.is_main:
+            try:
+                await self._sync_sub_agent_config(
+                    new_stack.paths.config_path,
+                    new_stack.config,
+                )
+            except Exception:
+                with contextlib.suppress(Exception):
+                    await new_stack.shutdown()
+                raise
         self._stacks[name] = new_stack
         if self._bus:
             self._bus.register(name, new_stack)
@@ -450,16 +461,16 @@ class AgentSupervisor:
             logger.exception("Failed to create sub-agent '%s'", name)
             return
 
-        # Workspace init creates config.json from config.example (main defaults).
-        # Overwrite model/provider/effort so the on-disk config matches agents.json.
-        config_path = agent_home / "config" / "config.json"
-        if config_path.exists():
-            await update_config_file_async(
-                config_path,
-                provider=config.provider,
-                model=config.model,
-                reasoning_effort=config.reasoning_effort,
+        try:
+            await self._sync_sub_agent_config(stack.paths.config_path, stack.config)
+        except Exception:
+            with contextlib.suppress(Exception):
+                await stack.shutdown()
+            logger.error(  # noqa: TRY400 - exception text may contain access lists
+                "Failed to synchronize sub-agent config name=%s category=unavailable",
+                name,
             )
+            return
 
         self._stacks[name] = stack
         self._health[name] = AgentHealth(name=name)
@@ -477,6 +488,22 @@ class AgentSupervisor:
             await self._shared_knowledge.sync_agent(stack.paths.mainmemory_path)
 
         logger.info("Sub-agent '%s' started (home=%s)", name, agent_home)
+
+    async def _sync_sub_agent_config(
+        self,
+        config_path: Path,
+        config: AgentConfig,
+    ) -> None:
+        """Persist the exact runtime selection and chat authorization fields."""
+        await update_config_file_async(
+            config_path,
+            provider=config.provider,
+            model=config.model,
+            reasoning_effort=config.reasoning_effort,
+            allowed_user_ids=config.allowed_user_ids,
+            allowed_group_ids=config.allowed_group_ids,
+            group_mention_only=config.group_mention_only,
+        )
 
     async def stop_agent(self, name: str) -> None:
         """Stop a sub-agent gracefully."""
