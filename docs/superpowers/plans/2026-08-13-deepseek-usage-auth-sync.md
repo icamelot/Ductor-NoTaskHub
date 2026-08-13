@@ -559,6 +559,7 @@ git commit -m "feat(deepseek): delegate isolated turns to Claude CLI"
 - Modify: `ductor_bot/cli/param_resolver.py`
 - Modify: `ductor_bot/orchestrator/core.py`
 - Modify: `ductor_bot/orchestrator/lifecycle.py`
+- Modify: `ductor_bot/i18n/{de,en,es,fr,id,nl,pt,ru}/chat.toml`
 - Test: `tests/orchestrator/test_providers.py`
 - Test: `tests/orchestrator/test_model_selector.py`
 - Test: `tests/orchestrator/test_core_provider_info.py`
@@ -709,6 +710,7 @@ Extract one `_build_cli_service_config(config, docker_container)` helper in `cor
 /home/zqxu/ductor/.venv/bin/ruff check ductor_bot/orchestrator ductor_bot/cli/param_resolver.py
 /home/zqxu/ductor/.venv/bin/mypy ductor_bot/orchestrator ductor_bot/cli/param_resolver.py
 git add ductor_bot/orchestrator ductor_bot/cli/param_resolver.py \
+  ductor_bot/i18n/{de,en,es,fr,id,nl,pt,ru}/chat.toml \
   tests/orchestrator/test_providers.py tests/orchestrator/test_model_selector.py \
   tests/orchestrator/test_core_provider_info.py tests/orchestrator/test_core.py \
   tests/cli/test_param_resolver.py
