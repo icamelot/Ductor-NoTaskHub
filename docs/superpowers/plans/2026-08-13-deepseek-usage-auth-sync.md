@@ -408,7 +408,9 @@ def test_factory_delegates_deepseek_to_claude_without_changing_provider(runtime)
     config = CLIConfig(provider="deepseek", model="deepseek-v4-pro", deepseek=runtime)
     cli = create_cli(config)
     assert isinstance(cli, ClaudeCodeCLI)
-    assert cli.config.provider == "deepseek"
+    # ClaudeCodeCLI stores its constructor config in the existing private field;
+    # do not add a test-only public accessor.
+    assert cli._config.provider == "deepseek"
 
 
 def test_host_deepseek_overrides_have_highest_precedence(
