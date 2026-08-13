@@ -203,15 +203,7 @@ class ProviderManager:
         codex_ids = frozenset(
             model.id for model in getattr(cache, "models", ()) if isinstance(model.id, str)
         )
-        if codex_ids.intersection(self._deepseek_runtime.models):
-            self._deepseek_runtime = replace(self._deepseek_runtime, error="model_collision")
-            self._models.configure_deepseek(())
-            self._available_providers = frozenset(
-                provider for provider in self._available_providers if provider != "deepseek"
-            )
-            if self._cli_service is not None:
-                self._cli_service.update_available_providers(self._available_providers)
-        self._known_model_ids = (
+        reserved_ids = (
             CLAUDE_MODELS
             | ANTIGRAVITY_MODELS
             | GROK_MODELS
@@ -219,8 +211,17 @@ class ProviderManager:
             | get_gemini_models()
             | get_antigravity_models()
             | get_grok_models()
-            | self._models.deepseek_models
+            | codex_ids
         )
+        if reserved_ids.intersection(self._deepseek_runtime.models):
+            self._deepseek_runtime = replace(self._deepseek_runtime, error="model_collision")
+            self._models.configure_deepseek(())
+            self._available_providers = frozenset(
+                provider for provider in self._available_providers if provider != "deepseek"
+            )
+            if self._cli_service is not None:
+                self._cli_service.update_available_providers(self._available_providers)
+        self._known_model_ids = reserved_ids | self._models.deepseek_models
 
     def resolve_runtime_target(self, requested_model: str | None = None) -> tuple[str, str]:
         """Resolve requested model to the effective ``(model, provider)`` pair."""

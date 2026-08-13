@@ -11,7 +11,9 @@ from ductor_bot.cli.deepseek import DeepseekRuntime, resolve_deepseek_runtime
 from ductor_bot.config import (
     AgentConfig,
     DeepseekConfig,
+    reset_antigravity_models,
     reset_gemini_models,
+    reset_grok_models,
     set_gemini_models,
 )
 from ductor_bot.orchestrator.providers import ProviderManager
@@ -20,8 +22,12 @@ from ductor_bot.orchestrator.providers import ProviderManager
 @pytest.fixture(autouse=True)
 def _reset_gemini():
     reset_gemini_models()
+    reset_antigravity_models()
+    reset_grok_models()
     yield
     reset_gemini_models()
+    reset_antigravity_models()
+    reset_grok_models()
 
 
 def _pm(
@@ -110,6 +116,35 @@ def test_cached_codex_collision_disables_deepseek() -> None:
 
     manager.refresh_known_model_ids()
 
+    assert manager.models.deepseek_models == frozenset()
+    assert "deepseek" not in manager.available_providers
+
+
+@pytest.mark.parametrize(
+    "callback_name",
+    [
+        "on_gemini_models_refresh",
+        "on_antigravity_models_refresh",
+        "on_grok_models_refresh",
+    ],
+)
+def test_dynamic_provider_collision_disables_deepseek(callback_name: str) -> None:
+    collision = "late-discovered-model"
+    runtime = resolve_deepseek_runtime(
+        DeepseekConfig(enabled=True, models=[collision]),
+        "secret",
+        reserved_models=frozenset({"opus"}),
+    )
+    manager = ProviderManager(
+        AgentConfig(),
+        deepseek_runtime=runtime,
+        claude_cli_runnable=True,
+    )
+    manager._available_providers = frozenset({"deepseek"})
+
+    getattr(manager, callback_name)((collision,))
+
+    assert manager.deepseek_runtime.error == "model_collision"
     assert manager.models.deepseek_models == frozenset()
     assert "deepseek" not in manager.available_providers
 
