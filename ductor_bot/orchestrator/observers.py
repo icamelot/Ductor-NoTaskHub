@@ -12,6 +12,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from ductor_bot.background import BackgroundObserver, BackgroundResult
 
@@ -21,6 +22,7 @@ from ductor_bot.cleanup import CleanupObserver
 from ductor_bot.cli.antigravity_cache_observer import AntigravityCacheObserver
 from ductor_bot.cli.codex_cache import CodexModelCache
 from ductor_bot.cli.codex_cache_observer import CodexCacheObserver
+from ductor_bot.cli.deepseek import DeepseekRuntime
 from ductor_bot.cli.gemini_cache_observer import GeminiCacheObserver
 from ductor_bot.cli.grok_cache_observer import GrokCacheObserver
 from ductor_bot.cli.service import CLIService
@@ -29,11 +31,17 @@ from ductor_bot.config import (
     get_antigravity_models,
     get_gemini_models,
     get_grok_models,
+    resolve_user_timezone,
 )
 from ductor_bot.config_reload import ConfigReloader
 from ductor_bot.cron.manager import CronManager
 from ductor_bot.cron.observer import CronObserver
 from ductor_bot.heartbeat import HeartbeatObserver
+from ductor_bot.usage.clients import fetch_deepseek_balance
+from ductor_bot.usage.models import DeepseekUsage
+from ductor_bot.usage.observer import DeepSeekBalanceObserver
+from ductor_bot.usage.service import UsageService
+from ductor_bot.usage.snapshots import BalanceSnapshotRepository, SnapshotUnavailable
 from ductor_bot.webhook.manager import WebhookManager
 from ductor_bot.webhook.models import WebhookResult
 from ductor_bot.webhook.observer import WebhookObserver
@@ -61,6 +69,13 @@ class ObserverManager:
         self.gemini_cache_obs: GeminiCacheObserver | None = None
         self.antigravity_cache_obs: AntigravityCacheObserver | None = None
         self.grok_cache_obs: GrokCacheObserver | None = None
+        self.deepseek_balance: DeepSeekBalanceObserver | None = None
+        self.balance_repository = BalanceSnapshotRepository(
+            paths.deepseek_balance_snapshots_path,
+            paths.legacy_balance_snapshots_path,
+        )
+        self._usage_service: UsageService | None = None
+        self._is_main = False
 
         self._config_reloader: ConfigReloader | None = None
         self._rule_sync_task: asyncio.Task[None] | None = None
@@ -159,8 +174,27 @@ class ObserverManager:
 
     # -- Start / stop ---------------------------------------------------------
 
-    async def start_all(self, *, docker_container: str = "") -> None:
+    async def start_all(
+        self,
+        *,
+        docker_container: str = "",
+        is_main: bool,
+        deepseek_runtime: DeepseekRuntime,
+        usage_service: UsageService,
+    ) -> None:
         """Start all observers and background watchers."""
+        self._is_main = is_main
+        self._usage_service = usage_service
+        try:
+            await self.balance_repository.initialize()
+        except asyncio.CancelledError:
+            raise
+        except (OSError, SnapshotUnavailable):
+            logger.warning("DeepSeek balance initialization failed category=unavailable")
+        await self.reconfigure_deepseek(
+            deepseek_runtime,
+            resolve_user_timezone(self._config.user_timezone),
+        )
         if self.cron:
             await self.cron.start()
         await self.heartbeat.start()
@@ -193,6 +227,9 @@ class ObserverManager:
 
     async def stop_all(self) -> None:
         """Stop all background observers and caches."""
+        if self.deepseek_balance:
+            await self.deepseek_balance.stop()
+            self.deepseek_balance = None
         if self._config_reloader:
             await self._config_reloader.stop()
         if self.background:
@@ -219,6 +256,29 @@ class ObserverManager:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+
+    async def reconfigure_deepseek(
+        self,
+        runtime: DeepseekRuntime,
+        user_timezone: ZoneInfo,
+    ) -> None:
+        """Apply hot-reloaded DeepSeek state to usage queries and observation."""
+        if self._usage_service is not None:
+            self._usage_service.update_deepseek(runtime, user_timezone)
+        if self.deepseek_balance is not None:
+            await self.deepseek_balance.stop()
+            self.deepseek_balance = None
+        if not self._is_main or not runtime.configured:
+            return
+
+        async def _fetch() -> DeepseekUsage:
+            return await fetch_deepseek_balance(runtime)
+
+        self.deepseek_balance = DeepSeekBalanceObserver(
+            _fetch,
+            self.balance_repository,
+        )
+        await self.deepseek_balance.start()
 
     # -- Bus wiring (single entry point) --------------------------------------
 

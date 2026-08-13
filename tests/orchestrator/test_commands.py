@@ -13,6 +13,7 @@ from ductor_bot.orchestrator.commands import (
     cmd_memory,
     cmd_model,
     cmd_status,
+    cmd_usage,
 )
 from ductor_bot.orchestrator.core import Orchestrator
 from ductor_bot.session.key import SessionKey
@@ -25,11 +26,24 @@ _AUTHED = {
 }
 
 
-async def test_model_list_returns_keyboard(orch: Orchestrator) -> None:
-    with patch(
-        "ductor_bot.orchestrator.selectors.model_selector.check_all_auth", return_value=_AUTHED
+async def test_usage_collects_and_formats_shared_report(orch: Orchestrator) -> None:
+    report = object()
+    orch._usage_service.collect = AsyncMock(return_value=report)
+    with (
+        patch("ductor_bot.orchestrator.commands.format_usage", return_value="usage report") as fmt,
+        patch("ductor_bot.orchestrator.commands.resolve_user_timezone") as timezone,
     ):
-        result = await cmd_model(orch, SessionKey(chat_id=1), "/model")
+        result = await cmd_usage(orch, SessionKey(chat_id=1), "/usage")
+
+    assert result.text == "usage report"
+    orch._usage_service.collect.assert_awaited_once()
+    timezone.assert_called_once_with(orch.config.user_timezone)
+    fmt.assert_called_once_with(report, timezone=timezone.return_value)
+
+
+async def test_model_list_returns_keyboard(orch: Orchestrator) -> None:
+    orch._providers._available_providers = frozenset(_AUTHED)
+    result = await cmd_model(orch, SessionKey(chat_id=1), "/model")
     assert result.buttons is not None
     assert "Model Selector" in result.text
 

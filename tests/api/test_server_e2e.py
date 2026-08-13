@@ -260,6 +260,24 @@ class TestEncryptedMessages:
         assert result["stream_fallback"] is False
         await ws.close()
 
+    async def test_usage_command_is_preserved_for_orchestrator(self, tmp_path: Path) -> None:
+        handler = AsyncMock(
+            return_value=SimpleNamespace(text="usage report", stream_fallback=False)
+        )
+        server = _make_server(tmp_path, message_handler=handler)
+        tc = TestClient(TestServer(_build_app(server)))
+        await tc.start_server()
+        ws = await tc.ws_connect("/ws")
+        e2e, _ = await _do_handshake(ws)
+
+        await _send_encrypted(ws, e2e, {"type": "message", "text": "/usage"})
+        result = await _recv_encrypted(ws, e2e)
+
+        assert result["text"] == "usage report"
+        assert handler.await_args.args[1] == "/usage"
+        await ws.close()
+        await tc.close()
+
     async def test_streaming_callbacks_encrypted(self, tmp_path: Path) -> None:
         """Verify text_delta, tool_activity, system_status are all encrypted."""
         events: list[dict[str, Any]] = []

@@ -33,9 +33,10 @@ def _mock_response(**kwargs: object) -> AgentResponse:
     return AgentResponse(**defaults)  # type: ignore[arg-type]
 
 
-def test_deepseek_hot_reload_reuses_startup_captured_key(orch: Orchestrator) -> None:
+async def test_deepseek_hot_reload_reuses_startup_captured_key(orch: Orchestrator) -> None:
     orch._deepseek_api_key = "startup-key"
     orch._providers._claude_cli_runnable = True
+    orch._observers.reconfigure_deepseek = AsyncMock()
     config = AgentConfig(
         deepseek=DeepseekConfig(enabled=True, models=["deepseek-hot"]),
     )
@@ -44,10 +45,13 @@ def test_deepseek_hot_reload_reuses_startup_captured_key(orch: Orchestrator) -> 
         side_effect=AssertionError("hot reload must not reread .env"),
     ):
         orch._on_config_hot_reload(config, {"deepseek": config.deepseek.model_dump()})
+        await asyncio.sleep(0)
 
     assert orch.models.deepseek_models == frozenset({"deepseek-hot"})
     updated = orch._cli_service.update_config.call_args.args[0]
     assert updated.deepseek.api_key == "startup-key"
+    reconfigured = orch._observers.reconfigure_deepseek.await_args.args[0]
+    assert reconfigured.api_key == "startup-key"
 
 
 # -- command dispatch --

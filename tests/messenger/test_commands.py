@@ -63,3 +63,7 @@ class TestCommandSetIntegrity:
 
     def test_removed_background_command_is_not_classified(self) -> None:
         assert "tasks" not in ORCHESTRATOR_COMMANDS
+
+    def test_usage_is_advertised_once_and_orchestrator_routed(self) -> None:
+        assert [name for name, _description in BOT_COMMANDS].count("usage") == 1
+        assert "usage" in ORCHESTRATOR_COMMANDS

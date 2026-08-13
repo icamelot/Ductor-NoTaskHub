@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from ductor_bot.orchestrator.registry import CommandRegistry, OrchestratorResult
+from ductor_bot.session.key import SessionKey
 
 
 @pytest.fixture
@@ -70,3 +71,13 @@ async def test_prefix_match_strips_bot_mention(registry: CommandRegistry) -> Non
     result = await registry.dispatch("/model@mybot sonnet", AsyncMock(), 1, "/model@mybot sonnet")
     assert result is not None
     assert result.text == "matched"
+
+
+async def test_usage_dispatches_through_shared_registry(orch: object) -> None:
+    usage_service = orch._usage_service
+    usage_service.collect = AsyncMock()
+    with patch("ductor_bot.orchestrator.commands.format_usage", return_value="usage report"):
+        result = await orch.handle_message(SessionKey(chat_id=1), "/usage")
+
+    assert result.text == "usage report"
+    usage_service.collect.assert_awaited_once()

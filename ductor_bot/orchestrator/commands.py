@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ductor_bot.cli.auth import check_all_auth
+from ductor_bot.config import resolve_user_timezone
 from ductor_bot.i18n import t
 from ductor_bot.infra.version import check_pypi, get_current_version
 from ductor_bot.orchestrator.registry import OrchestratorResult
@@ -20,6 +21,7 @@ from ductor_bot.orchestrator.selectors.model_selector import (
 from ductor_bot.orchestrator.selectors.models import Button, ButtonGrid
 from ductor_bot.orchestrator.selectors.session_selector import session_selector_start
 from ductor_bot.text.response_format import SEP, fmt, new_session_text
+from ductor_bot.usage.formatting import format_usage
 from ductor_bot.workspace.loader import read_mainmemory
 
 if TYPE_CHECKING:
@@ -52,6 +54,18 @@ async def cmd_status(orch: Orchestrator, key: SessionKey, _text: str) -> Orchest
     """Handle /status."""
     logger.info("Status requested")
     return OrchestratorResult(text=await _build_status(orch, key))
+
+
+async def cmd_usage(orch: Orchestrator, _key: SessionKey, _text: str) -> OrchestratorResult:
+    """Handle /usage through the shared provider-neutral service."""
+    logger.info("Usage requested")
+    report = await orch.usage_service.collect()
+    return OrchestratorResult(
+        text=format_usage(
+            report,
+            timezone=resolve_user_timezone(orch.config.user_timezone),
+        )
+    )
 
 
 async def cmd_model(orch: Orchestrator, key: SessionKey, text: str) -> OrchestratorResult:

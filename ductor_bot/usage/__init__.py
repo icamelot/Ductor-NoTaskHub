@@ -17,11 +17,13 @@ from ductor_bot.usage.models import (
     UsageWindow,
     failure_result,
 )
+from ductor_bot.usage.observer import DeepSeekBalanceObserver
 from ductor_bot.usage.service import UsageService
 
 __all__ = [
     "Balance",
     "BalanceDelta",
+    "DeepSeekBalanceObserver",
     "DeepseekUsage",
     "PlanUsage",
     "ProviderUsage",

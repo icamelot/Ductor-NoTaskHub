@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Coroutine
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from ductor_bot.bus.envelope import Envelope, Origin
+from ductor_bot.messenger.matrix.bot import MatrixBot
 from ductor_bot.messenger.matrix.transport import MatrixTransport
 
 if TYPE_CHECKING:
@@ -39,6 +41,23 @@ def _env(**kwargs: object) -> Envelope:
     defaults: dict[str, object] = {"origin": Origin.CRON, "chat_id": 42}
     defaults.update(kwargs)
     return Envelope(**defaults)  # type: ignore[arg-type]
+
+
+async def test_matrix_usage_is_routed_to_orchestrator() -> None:
+    bot = object.__new__(MatrixBot)
+    bot._COMMAND_DISPATCH = {}
+    bot._cmd_orchestrator_locked = AsyncMock()
+    spawned: list[Coroutine[object, object, None]] = []
+
+    def capture(coro: Coroutine[object, object, None], *, name: str) -> None:
+        assert name == "mx-orch-usage"
+        spawned.append(coro)
+
+    bot._spawn_task = capture  # type: ignore[method-assign,assignment]
+    await bot._handle_command("/usage", "!room:test", 7, MagicMock())
+    assert len(spawned) == 1
+    await spawned[0]
+    bot._cmd_orchestrator_locked.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

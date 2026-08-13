@@ -191,6 +191,47 @@ def test_chat_placeholders_are_valid() -> None:
             assert ph.isidentifier(), f"Bad placeholder {{{ph}}} in {key}"
 
 
+def test_usage_catalogs_have_key_and_placeholder_parity() -> None:
+    usage_keys = {
+        "usage.header",
+        "usage.deepseek",
+        "usage.claude",
+        "usage.codex",
+        "usage.balance",
+        "usage.spent_today",
+        "usage.recharged_today",
+        "usage.daily_unavailable",
+        "usage.plan",
+        "usage.short_window",
+        "usage.five_hour",
+        "usage.weekly",
+        "usage.resets",
+        "usage.window_unavailable",
+        "usage.error_disabled",
+        "usage.error_not_configured",
+        "usage.error_not_logged_in",
+        "usage.error_expired",
+        "usage.error_rate_limited",
+        "usage.error_timeout",
+        "usage.error_malformed_response",
+        "usage.error_unavailable",
+    }
+    english_chat = _load_toml(_I18N_ROOT / "en" / "chat.toml")
+    english_commands = _load_toml(_I18N_ROOT / "en" / "commands.toml")
+    assert usage_keys <= english_chat.keys()
+    assert "bot.usage" in english_commands
+
+    for lang_code in LANGUAGES:
+        localized_chat = _load_toml(_I18N_ROOT / lang_code / "chat.toml")
+        localized_commands = _load_toml(_I18N_ROOT / lang_code / "commands.toml")
+        assert usage_keys <= localized_chat.keys()
+        assert "bot.usage" in localized_commands
+        for key in usage_keys:
+            assert _extract_placeholders(localized_chat[key]) == _extract_placeholders(
+                english_chat[key]
+            )
+
+
 # -- LANGUAGES dict consistency ------------------------------------------------
 
 

@@ -30,6 +30,7 @@ from ductor_bot.config import (
     get_antigravity_models,
     get_gemini_models,
     get_grok_models,
+    resolve_user_timezone,
 )
 from ductor_bot.cron.manager import CronManager
 from ductor_bot.errors import (
@@ -53,6 +54,7 @@ from ductor_bot.orchestrator.commands import (
     cmd_sessions,
     cmd_status,
     cmd_upgrade,
+    cmd_usage,
 )
 from ductor_bot.orchestrator.directives import parse_directives
 from ductor_bot.orchestrator.flows import (
@@ -76,6 +78,7 @@ from ductor_bot.security import detect_suspicious_patterns
 from ductor_bot.session import SessionKey, SessionManager
 from ductor_bot.session.manager import SessionData
 from ductor_bot.session.named import NamedSessionRegistry
+from ductor_bot.usage.service import UsageService
 from ductor_bot.webhook.manager import WebhookManager
 from ductor_bot.workspace.paths import DuctorPaths
 from ductor_bot.workspace.project_roots import resolve_project_root
@@ -173,6 +176,12 @@ class Orchestrator:
         self._cron_manager = CronManager(jobs_path=paths.cron_jobs_path)
         self._webhook_manager = WebhookManager(hooks_path=paths.webhooks_path)
         self._observers = ObserverManager(config, paths)
+        self._usage_service = UsageService(
+            deepseek_runtime,
+            self._observers.balance_repository,
+            user_timezone=resolve_user_timezone(config.user_timezone),
+            is_main=agent_name == "main",
+        )
 
         async def _heartbeat_handler(
             chat_id: int,
@@ -313,6 +322,11 @@ class Orchestrator:
     def process_registry(self) -> ProcessRegistry:
         """Public access to the process registry."""
         return self._process_registry
+
+    @property
+    def usage_service(self) -> UsageService:
+        """Public read-only access to provider usage aggregation."""
+        return self._usage_service
 
     @property
     def bg_observer(self) -> BackgroundObserver | None:
@@ -482,6 +496,7 @@ class Orchestrator:
         # /stop is handled entirely by the Middleware abort path (before the lock)
         # and never reaches the orchestrator command registry.
         reg.register_async("/status", cmd_status)
+        reg.register_async("/usage", cmd_usage)
         reg.register_async("/model", cmd_model)
         reg.register_async("/model ", cmd_model)
         reg.register_async("/effort", cmd_effort)
@@ -795,6 +810,15 @@ class Orchestrator:
         if "deepseek" in hot:
             runtime = self._resolve_deepseek_runtime(config)
             self._providers.refresh_deepseek(runtime, self._cli_service)
+        if "deepseek" in hot or "user_timezone" in hot:
+            runtime = self._providers.deepseek_runtime
+            task = asyncio.create_task(
+                self._observers.reconfigure_deepseek(
+                    runtime,
+                    resolve_user_timezone(config.user_timezone),
+                )
+            )
+            task.add_done_callback(lambda _: None)
         if any(
             k in hot
             for k in (

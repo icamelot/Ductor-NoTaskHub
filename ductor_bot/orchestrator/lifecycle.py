@@ -116,7 +116,12 @@ async def create_orchestrator(
     )
     orch._providers._codex_cache_fn = lambda: orch._observers.codex_cache
     orch._providers.refresh_known_model_ids()
-    await orch._observers.start_all(docker_container=docker_container)
+    await orch._observers.start_all(
+        docker_container=docker_container,
+        is_main=agent_name == "main",
+        deepseek_runtime=orch._providers.deepseek_runtime,
+        usage_service=orch.usage_service,
+    )
 
     # Direct API server (WebSocket, designed for Tailscale)
     if config.api.enabled:

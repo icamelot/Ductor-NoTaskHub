@@ -1221,6 +1221,8 @@ class TestSyncCommands:
         await tg_bot._sync_commands()
 
         bot_instance.set_my_commands.assert_called_once_with(_BOT_COMMANDS)
+        desired_names = {command.command for command in _BOT_COMMANDS}
+        assert "usage" in desired_names
 
     async def test_skips_when_commands_match(self) -> None:
         from ductor_bot.messenger.telegram.app import _BOT_COMMANDS

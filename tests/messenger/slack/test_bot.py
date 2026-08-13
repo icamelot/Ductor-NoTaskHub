@@ -300,6 +300,23 @@ class TestMessageRouting:
         assert bot._handle_command.await_args.args[0] == "/status"
         bot._dispatch_with_lock.assert_not_awaited()
 
+    async def test_routes_bare_usage_command_without_leading_slash(self) -> None:
+        bot = _make_bot()
+
+        await bot._on_message(
+            {
+                "user": "U123",
+                "channel": "C123",
+                "channel_type": "im",
+                "ts": "1710000000.456",
+                "text": "usage",
+            }
+        )
+
+        bot._handle_command.assert_awaited_once()
+        assert bot._handle_command.await_args.args[0] == "/usage"
+        bot._dispatch_with_lock.assert_not_awaited()
+
     async def test_routes_bare_message_command_with_arguments_when_supported(self) -> None:
         bot = _make_bot()
 
