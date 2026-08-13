@@ -6,8 +6,8 @@ from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.cli.deepseek import DeepseekRuntime
+from ductor_bot.cli.process_registry import ProcessRegistry
 from ductor_bot.cli.service import CLIService, CLIServiceConfig
 from ductor_bot.cli.stream_events import StreamEvent, ToolUseEvent
 from ductor_bot.cli.types import AgentRequest, CLIResponse

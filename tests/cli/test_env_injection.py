@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
-
-import pytest
 
 from ductor_bot.cli.base import CLIConfig, docker_wrap
 from ductor_bot.cli.deepseek import DeepseekRuntime
 from ductor_bot.cli.executor import build_subprocess_env
 from ductor_bot.infra.env_secrets import clear_cache
+
+if TYPE_CHECKING:
+    import pytest
 
 _REMOVED_ENV_PARTS = ("DUCTOR", "TASK", "ID")
 _REMOVED_TASK_ENV = "_".join(_REMOVED_ENV_PARTS)
