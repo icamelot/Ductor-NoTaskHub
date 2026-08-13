@@ -20,7 +20,7 @@ _DEDUPE_INTERVAL = timedelta(minutes=30)
 _LOCKS: dict[Path, asyncio.Lock] = {}
 
 
-class SnapshotUnavailable(RuntimeError):
+class SnapshotUnavailable(RuntimeError):  # noqa: N818 - public contract from the plan
     """Current-format snapshot state is malformed or inaccessible."""
 
 
@@ -43,24 +43,29 @@ def _lock_for(path: Path) -> asyncio.Lock:
 
 def _money(value: object) -> Decimal:
     if isinstance(value, bool):
-        raise ValueError
+        raise TypeError
     try:
         result = Decimal(str(value))
     except (InvalidOperation, ValueError):
         raise ValueError from None
-    if not result.is_finite() or result.as_tuple().exponent < -18:
+    exponent = result.as_tuple().exponent
+    if not result.is_finite() or not isinstance(exponent, int) or exponent < -18:
         raise ValueError
     return result
 
 
 def _balance(currency: object, total: object) -> Balance:
-    if not isinstance(currency, str) or not currency.strip():
+    if not isinstance(currency, str):
+        raise TypeError
+    if not currency.strip():
         raise ValueError
     return Balance(currency.strip().upper(), _money(total))
 
 
 def _balances(value: object) -> tuple[Balance, ...]:
-    if not isinstance(value, list | tuple) or not value:
+    if not isinstance(value, list | tuple):
+        raise TypeError
+    if not value:
         raise ValueError
     normalized: list[Balance] = []
     currencies: set[str] = set()
@@ -70,7 +75,7 @@ def _balances(value: object) -> tuple[Balance, ...]:
         elif isinstance(entry, dict):
             balance = _balance(entry.get("currency"), entry.get("total"))
         else:
-            raise ValueError
+            raise TypeError
         if balance.currency in currencies:
             raise ValueError
         normalized.append(balance)
@@ -80,7 +85,7 @@ def _balances(value: object) -> tuple[Balance, ...]:
 
 def _captured_at(value: object) -> datetime:
     if not isinstance(value, str):
-        raise ValueError
+        raise TypeError
     try:
         result = datetime.fromisoformat(value)
     except ValueError:
@@ -95,16 +100,18 @@ def _balance_identity(balances: tuple[Balance, ...]) -> tuple[tuple[str, Decimal
 
 
 def _parse_document(raw: object) -> _Document:
-    if not isinstance(raw, dict) or raw.get("version") != _VERSION:
+    if not isinstance(raw, dict):
+        raise TypeError
+    if raw.get("version") != _VERSION:
         raise ValueError
     marker = raw.get("legacy_import_completed")
     snapshots = raw.get("snapshots")
     if not isinstance(marker, bool) or not isinstance(snapshots, list):
-        raise ValueError
+        raise TypeError
     parsed: list[BalanceSnapshot] = []
     for item in snapshots:
         if not isinstance(item, dict):
-            raise ValueError
+            raise TypeError
         parsed.append(
             BalanceSnapshot(
                 _captured_at(item.get("captured_at")),
@@ -172,7 +179,7 @@ class BalanceSnapshotRepository:
     def _read_current(self) -> _Document:
         try:
             return _parse_document(json.loads(self._path.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
             raise SnapshotUnavailable from exc
 
     def _save(self, document: _Document) -> None:
@@ -210,7 +217,7 @@ class BalanceSnapshotRepository:
             try:
                 timestamp = _captured_at(entry.get("timestamp") or entry.get("captured_at"))
                 total = _money(entry.get("balance"))
-            except ValueError:
+            except (TypeError, ValueError):
                 continue
             identity = (timestamp, total)
             if identity not in seen:
@@ -221,10 +228,10 @@ class BalanceSnapshotRepository:
     def _record_locked(self, balances: tuple[Balance, ...], captured_at: datetime) -> bool:
         try:
             normalized = _balances(balances)
-            if captured_at.tzinfo is None:
-                raise ValueError
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             raise SnapshotUnavailable from exc
+        if captured_at.tzinfo is None:
+            raise SnapshotUnavailable
         document = self._initialize_locked()
         captured_at = captured_at.astimezone(UTC)
         cutoff = captured_at - _RETENTION

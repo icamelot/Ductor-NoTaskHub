@@ -64,6 +64,14 @@ class PlanUsage:
 ProviderUsage = DeepseekUsage | PlanUsage
 
 
+@dataclass(frozen=True, slots=True)
+class UsageReport:
+    deepseek: DeepseekUsage
+    claude: PlanUsage
+    codex: PlanUsage
+    deltas: tuple[BalanceDelta, ...] = ()
+
+
 def failure_result(provider: UsageProvider, failure: UsageFailure) -> ProviderUsage:
     if provider == "deepseek":
         return DeepseekUsage(ok=False, failure=failure)

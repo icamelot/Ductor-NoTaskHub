@@ -21,6 +21,10 @@ def repo(tmp_path: Path) -> BalanceSnapshotRepository:
     return BalanceSnapshotRepository(tmp_path / "snapshots.json", tmp_path / "legacy.json")
 
 
+def _temporary_files(path: Path) -> list[Path]:
+    return list(path.glob("*.tmp"))
+
+
 async def test_record_round_trips_decimal_strings(tmp_path: Path) -> None:
     repository = BalanceSnapshotRepository(
         tmp_path / "deepseek_balance_snapshots.json",
@@ -44,7 +48,7 @@ async def test_record_round_trips_decimal_strings(tmp_path: Path) -> None:
             }
         ],
     }
-    assert list(tmp_path.glob("*.tmp")) == []
+    assert await asyncio.to_thread(_temporary_files, tmp_path) == []
 
 
 @pytest.mark.parametrize(
@@ -91,7 +95,7 @@ async def test_invalid_current_documents_are_preserved(tmp_path: Path, document:
 @pytest.mark.parametrize(
     "balance",
     [
-        Balance("", Decimal("1")),
+        Balance("", Decimal(1)),
         Balance("CNY", Decimal("NaN")),
         Balance("CNY", Decimal("Infinity")),
         Balance("CNY", Decimal("0.0000000000000000001")),
@@ -113,7 +117,7 @@ async def test_atomic_write_failure_preserves_original_target(tmp_path: Path) ->
     path = tmp_path / "snapshots.json"
     repository = BalanceSnapshotRepository(path, tmp_path / "legacy.json")
     first = datetime(2026, 8, 13, tzinfo=UTC)
-    await repository.record((Balance("CNY", Decimal("100")),), captured_at=first)
+    await repository.record((Balance("CNY", Decimal(100)),), captured_at=first)
     evidence = path.read_bytes()
 
     with (
@@ -124,7 +128,7 @@ async def test_atomic_write_failure_preserves_original_target(tmp_path: Path) ->
         pytest.raises(OSError, match="simulated atomic failure"),
     ):
         await repository.record(
-            (Balance("CNY", Decimal("99")),),
+            (Balance("CNY", Decimal(99)),),
             captured_at=first + timedelta(minutes=1),
         )
 
@@ -145,13 +149,13 @@ async def test_deduplication_compares_normalized_currency_balances(
 ) -> None:
     first = datetime(2026, 8, 13, 0, 0, tzinfo=UTC)
     assert await repo.record(
-        (Balance("cny", Decimal("100")), Balance("USD", Decimal("10"))),
+        (Balance("cny", Decimal(100)), Balance("USD", Decimal(10))),
         captured_at=first,
     )
 
     assert (
         await repo.record(
-            (Balance("usd", Decimal("10")), Balance("CNY", Decimal("100"))),
+            (Balance("usd", Decimal(10)), Balance("CNY", Decimal(100))),
             captured_at=first + timedelta(minutes=29),
         )
         is False
@@ -183,7 +187,7 @@ async def test_deduplicated_record_still_prunes_expired_history(
     )
     repository = BalanceSnapshotRepository(path, tmp_path / "legacy.json")
 
-    assert await repository.record((Balance("CNY", Decimal("90")),), captured_at=now) is False
+    assert await repository.record((Balance("CNY", Decimal(90)),), captured_at=now) is False
     assert len(await repository.load()) == 1
 
 
@@ -247,21 +251,21 @@ async def test_today_delta_falls_back_to_latest_pre_midnight(
 ) -> None:
     now = datetime(2026, 8, 13, 4, tzinfo=UTC)
     await repo.record(
-        (Balance("CNY", Decimal("102")),),
+        (Balance("CNY", Decimal(102)),),
         captured_at=datetime(2026, 8, 12, 14, tzinfo=UTC),
     )
     await repo.record(
-        (Balance("CNY", Decimal("100")),),
+        (Balance("CNY", Decimal(100)),),
         captured_at=datetime(2026, 8, 12, 15, tzinfo=UTC),
     )
 
     deltas = await repo.today_deltas(
-        (Balance("CNY", Decimal("90")),),
+        (Balance("CNY", Decimal(90)),),
         timezone=ZoneInfo("Asia/Shanghai"),
         now=now,
     )
 
-    assert deltas[0].change == Decimal("10")
+    assert deltas[0].change == Decimal(10)
 
 
 async def test_today_delta_excludes_future_records(
@@ -269,12 +273,12 @@ async def test_today_delta_excludes_future_records(
 ) -> None:
     now = datetime(2026, 8, 13, 4, tzinfo=UTC)
     await repo.record(
-        (Balance("CNY", Decimal("100")),),
+        (Balance("CNY", Decimal(100)),),
         captured_at=now + timedelta(minutes=1),
     )
 
     deltas = await repo.today_deltas(
-        (Balance("CNY", Decimal("90")),), timezone=ZoneInfo("UTC"), now=now
+        (Balance("CNY", Decimal(90)),), timezone=ZoneInfo("UTC"), now=now
     )
 
     assert deltas[0].kind == "unavailable"
