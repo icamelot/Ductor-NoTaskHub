@@ -48,12 +48,12 @@ def _plan_lines(usage: PlanUsage, *, timezone: ZoneInfo) -> list[str]:
         lines.append(_error(usage.failure))
         return lines
     short_label = "usage.five_hour" if usage.provider == "claude" else "usage.short_window"
-    lines.extend(
-        [
-            _window(usage.short_window, label=short_label, timezone=timezone),
-            _window(usage.weekly_window, label="usage.weekly", timezone=timezone),
-        ]
-    )
+    if usage.short_window is not None:
+        lines.append(_window(usage.short_window, label=short_label, timezone=timezone))
+    if usage.weekly_window is not None:
+        lines.append(_window(usage.weekly_window, label="usage.weekly", timezone=timezone))
+    if usage.short_window is None and usage.weekly_window is None:
+        lines.append(t("usage.window_unavailable"))
     return lines
 
 

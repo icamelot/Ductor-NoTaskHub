@@ -326,7 +326,43 @@ def test_format_usage_renders_three_ordered_complete_sections() -> None:
     assert "5-hour usage: 12.50% (resets 2026-08-13 09:00 CST)" in rendered
     assert "7-day usage: 40%" in rendered
     assert "Short window: 100%" not in rendered
-    assert "Unavailable\n7-day usage: 100%" in rendered
+    assert "**Codex**\nPlan: plus\n7-day usage: 100%" in rendered
+    assert "Unavailable\n7-day usage: 100%" not in rendered
+
+
+def _report_with_codex(codex: PlanUsage) -> UsageReport:
+    return UsageReport(
+        deepseek=DeepseekUsage(ok=False, failure=UsageFailure.UNAVAILABLE),
+        claude=PlanUsage(provider="claude", ok=False, failure=UsageFailure.UNAVAILABLE),
+        codex=codex,
+    )
+
+
+def test_format_usage_hides_missing_weekly_window() -> None:
+    rendered = format_usage(
+        _report_with_codex(
+            PlanUsage(
+                provider="codex",
+                ok=True,
+                plan="plus",
+                short_window=UsageWindow(Decimal(25), None),
+            )
+        ),
+        timezone=ZoneInfo("UTC"),
+    )
+
+    codex_section = rendered.split("**Codex**\n", maxsplit=1)[1]
+    assert codex_section == "Plan: plus\nShort window: 25%"
+
+
+def test_format_usage_renders_one_unavailable_when_both_windows_are_missing() -> None:
+    rendered = format_usage(
+        _report_with_codex(PlanUsage(provider="codex", ok=True, plan="plus")),
+        timezone=ZoneInfo("UTC"),
+    )
+
+    codex_section = rendered.split("**Codex**\n", maxsplit=1)[1]
+    assert codex_section == "Plan: plus\nUnavailable"
 
 
 @pytest.mark.parametrize("failure", list(UsageFailure))
