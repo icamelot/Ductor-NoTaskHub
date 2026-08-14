@@ -91,6 +91,35 @@ def test_codex_windows_are_classified_by_duration_not_position() -> None:
     assert result.weekly_window.used_percent == Decimal(40)
 
 
+def test_codex_parser_ignores_rate_limit_metadata() -> None:
+    result = parse_codex_usage(
+        {
+            "plan_type": "plus",
+            "rate_limit": {
+                "allowed": True,
+                "limit_reached": False,
+                "primary_window": {
+                    "limit_window_seconds": 18000.0,
+                    "used_percent": 12,
+                    "reset_at": 1783611755,
+                },
+                "secondary_window": {
+                    "limit_window_seconds": 604800,
+                    "used_percent": 34,
+                    "reset_at": 1784177180,
+                },
+            },
+        }
+    )
+
+    assert result.ok is True
+    assert result.plan == "plus"
+    assert result.short_window is not None
+    assert result.short_window.used_percent == Decimal(12)
+    assert result.weekly_window is not None
+    assert result.weekly_window.used_percent == Decimal(34)
+
+
 def test_claude_parser_normalizes_windows_and_iso_reset() -> None:
     result = parse_claude_usage(
         {
@@ -217,3 +246,27 @@ async def test_deepseek_http_failure_never_reads_body(
     result = await fetch_deepseek_balance(runtime)
     assert result.failure is failure
     assert response.json_calls == 0
+
+
+async def test_codex_http_restores_compatible_headers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "auth.json").write_text(
+        json.dumps({"tokens": {"access_token": "token", "account_id": "account"}})
+    )
+    captured: dict[str, object] = {}
+    response = _Response(200, {"plan_type": "plus", "rate_limit": {}})
+    monkeypatch.setattr(
+        "ductor_bot.usage.clients.aiohttp.ClientSession",
+        lambda **kwargs: _Session(response, captured, **kwargs),
+    )
+
+    result = await fetch_codex_plan_usage(tmp_path)
+
+    assert result.ok is True
+    assert captured["headers"] == {
+        "Authorization": "Bearer token",
+        "Content-Type": "application/json",
+        "User-Agent": "ductor-usage/1.0",
+        "chatgpt-account-id": "account",
+    }

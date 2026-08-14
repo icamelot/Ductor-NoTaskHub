@@ -97,8 +97,13 @@ def _window(data: object, percent_key: str, reset_key: str) -> UsageWindow | Non
     if percent_key not in data:
         return None
     duration = data.get("limit_window_seconds")
-    if duration is not None and (isinstance(duration, bool) or not isinstance(duration, int)):
-        raise TypeError
+    if duration is not None:
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)):
+            raise TypeError
+        if isinstance(duration, float):
+            if not duration.is_integer():
+                raise ValueError
+            duration = int(duration)
     return UsageWindow(
         used_percent=_decimal(data[percent_key], percentage=True),
         resets_at=_datetime(data.get(reset_key)),
@@ -136,6 +141,8 @@ def _parse_codex_usage(data: object) -> PlanUsage:
     short: UsageWindow | None = None
     weekly: UsageWindow | None = None
     for raw in raw_limits.values():
+        if not isinstance(raw, dict):
+            continue
         window = _window(raw, "used_percent", "reset_at")
         if window is None:
             continue
@@ -284,7 +291,11 @@ async def fetch_codex_plan_usage(home: Path | None = None) -> PlanUsage:
     if credentials is None:
         return PlanUsage(provider="codex", ok=False, failure=UsageFailure.NOT_LOGGED_IN)
     token, account = credentials
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "User-Agent": "ductor-usage/1.0",
+    }
     if account:
         headers["chatgpt-account-id"] = account
     try:
