@@ -173,6 +173,19 @@ class TestTelegramBotInit:
         tg_bot, _ = _make_tg_bot()
         assert len(tg_bot._dp.sub_routers) > 0
 
+    def test_registers_usage_command_handler(self) -> None:
+        tg_bot, _ = _make_tg_bot()
+
+        registered_commands = {
+            command
+            for handler in tg_bot._router.message.handlers
+            if handler.callback == tg_bot._on_command
+            for filter_ in handler.filters
+            for command in getattr(filter_.callback, "commands", ())
+        }
+
+        assert "usage" in registered_commands
+
     def test_registers_callback_query_handler(self) -> None:
         tg_bot, _ = _make_tg_bot()
         assert len(tg_bot._router.callback_query.handlers) > 0
